@@ -1,5 +1,0 @@
-*.sh eol=lf
-lightcrafts/tools/bin/* eol=lf
-configure eol=lf
-config.sub eol=lf
-config.guess eol=lf
