@@ -27,11 +27,6 @@ import java.io.OutputStream;
 import com.sun.media.jai.codec.ImageEncoderImpl;
 import com.sun.media.jai.codec.ImageEncodeParam;
 import com.sun.media.jai.codec.JPEGEncodeParam;
-//
-// Need these classes since we are currently using the
-// Java2D JpegEncoder for our Jpeg Implementation.
-//
-import com.sun.image.codec.jpeg.JPEGQTable;
 import com.sun.media.jai.codecimpl.util.ImagingException;
 
 /**
@@ -62,8 +57,8 @@ public class JPEGImageEncoder extends ImageEncoderImpl {
     // com.sun.image.codec.jpeg.JPEGEncodeParam object.
     //
     static void modifyEncodeParam(JPEGEncodeParam jaiEP,
-          com.sun.image.codec.jpeg.JPEGEncodeParam j2dEP,
-                                               int nbands) {
+                                  com.sun.media.jai.codec.JPEGEncodeParam j2dEP,
+                                  int nbands) {
 
         int val;
         int[] qTab;
@@ -83,8 +78,7 @@ public class JPEGImageEncoder extends ImageEncoderImpl {
             if (jaiEP.isQTableSet(i)) {
                 qTab = jaiEP.getQTable(i);
                 val = jaiEP.getQTableSlot(i);
-                j2dEP.setQTableComponentMapping(i, val);
-                j2dEP.setQTable(val, new JPEGQTable(qTab));
+                j2dEP.setQTable(val, i, qTab);
             }
         }
 
@@ -100,20 +94,20 @@ public class JPEGImageEncoder extends ImageEncoderImpl {
 
         // Write a tables-only abbreviated JPEG file
         if (jaiEP.getWriteTablesOnly() == true) {
-            j2dEP.setImageInfoValid(false);
-            j2dEP.setTableInfoValid(true);
+            j2dEP.setWriteJFIFHeader(false);
+            j2dEP.setWriteTablesOnly(true);
         }
 
         // Write an image-only abbreviated JPEG file
         if (jaiEP.getWriteImageOnly() == true) {
-            j2dEP.setTableInfoValid(false);
-            j2dEP.setImageInfoValid(true);
+            j2dEP.setWriteTablesOnly(false);
+            j2dEP.setWriteJFIFHeader(true);
         }
 
         // Write the JFIF (APP0) marker
         if (jaiEP.getWriteJFIFHeader() == false) {
-            j2dEP.setMarkerData(
-              com.sun.image.codec.jpeg.JPEGDecodeParam.APP0_MARKER, null);
+            // FIXME
+            // j2dEP.setMarkerData(com.sun.image.codec.jpeg.JPEGDecodeParam.APP0_MARKER, null);
         }
 
     }
@@ -255,8 +249,8 @@ public class JPEGImageEncoder extends ImageEncoderImpl {
         }
 
         // Create the Java2D encodeParam based on the BufferedImage
-        com.sun.image.codec.jpeg.JPEGEncodeParam j2dEP =
-            com.sun.image.codec.jpeg.JPEGCodec.getDefaultJPEGEncodeParam(bi);
+        com.sun.media.jai.codec.JPEGEncodeParam j2dEP =
+            com.sun.media.jai.codec.JPEGCodec.getDefaultJPEGEncodeParam(bi);
 
         // Now modify the Java2D encodeParam based on the options set
         // in the JAI encodeParam object.
@@ -265,9 +259,8 @@ public class JPEGImageEncoder extends ImageEncoderImpl {
         }
 
         // Now create the encoder with the modified Java2D encodeParam
-        com.sun.image.codec.jpeg.JPEGImageEncoder encoder;
-        encoder = com.sun.image.codec.jpeg.JPEGCodec.createJPEGEncoder(
-                    output, j2dEP);
+        com.sun.media.jai.codecimpl.JPEGImageEncoder encoder;
+        encoder = JPEGCodec.createImageEncoder(output, j2dEP);
 
         try {
           // Write the image data.
