@@ -32,7 +32,6 @@ import com.sun.media.jai.codec.JPEGEncodeParam;
 // Java2D JpegEncoder for our Jpeg Implementation.
 //
 import com.sun.image.codec.jpeg.JPEGQTable;
-import com.sun.media.jai.codecimpl.ImagingListenerProxy;
 import com.sun.media.jai.codecimpl.util.ImagingException;
 
 /**

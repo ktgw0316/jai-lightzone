@@ -20,9 +20,9 @@ import java.io.IOException;
 import com.sun.media.jai.codec.ImageDecoderImpl;
 import com.sun.media.jai.codec.ImageDecodeParam;
 import com.sun.media.jai.codec.JPEGDecodeParam;
-import com.sun.media.jai.codecimpl.ImagingListenerProxy;
 import com.sun.media.jai.codecimpl.util.ImagingException;
-import com.sun.image.codec.jpeg.ImageFormatException;
+
+import javax.imageio.ImageIO;
 
 /**
  * @since EA2
@@ -95,24 +95,13 @@ class JPEGImage extends SimpleRenderedImage {
             stream = new NoMarkStream(stream);
         }
 
-        // Lock the entire class to work around lack of thread safety
-        // in com.sun.image.codec.jpeg.JPEGImageDecoder implementation.
         BufferedImage image = null;
-        synchronized(LOCK) {
-            com.sun.image.codec.jpeg.JPEGImageDecoder decoder =
-                com.sun.image.codec.jpeg.JPEGCodec.createJPEGDecoder(stream);
-            try {
-                // decodeAsBufferedImage performs default color conversions
-                image = decoder.decodeAsBufferedImage();
-            } catch (ImageFormatException e) {
-                String message = JaiI18N.getString("JPEGImageDecoder1");
-                sendExceptionToListener(message, (Exception)e);
-//                throw new RuntimeException(JaiI18N.getString("JPEGImageDecoder1"));
-            } catch (IOException e) {
-                String message = JaiI18N.getString("JPEGImageDecoder1");
-                sendExceptionToListener(message, (Exception)e);
+        try {
+            image = ImageIO.read(stream);
+        } catch (IOException e) {
+            String message = JaiI18N.getString("JPEGImageDecoder1");
+            sendExceptionToListener(message, (Exception)e);
 //                throw new RuntimeException(JaiI18N.getString("JPEGImageDecoder2"));
-            }
         }
 
         minX = 0;

@@ -8,24 +8,21 @@
  * $Revision: 1.1 $
  * $Date: 2005/02/11 04:56:57 $
  * $State: Exp $
- */package com.sun.media.jai.tilecodec;
+ */
+package com.sun.media.jai.tilecodec;
 
-import java.awt.Point;
-import java.awt.image.Raster;
-import java.awt.image.SampleModel;
-import java.io.OutputStream;
-import java.io.ObjectOutputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import javax.media.jai.ParameterListDescriptor;
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 import javax.media.jai.tilecodec.TileCodecDescriptor;
 import javax.media.jai.tilecodec.TileCodecParameterList;
 import javax.media.jai.tilecodec.TileEncoderImpl;
-import com.sun.image.codec.jpeg.JPEGEncodeParam ;
-import com.sun.image.codec.jpeg.JPEGImageEncoder ;
-import com.sun.image.codec.jpeg.JPEGCodec ;
-import com.sun.image.codec.jpeg.JPEGQTable ;
-import sun.awt.image.codec.JPEGParam ;
+import java.awt.image.Raster;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.Iterator;
 
 /**
  * A concrete implementation of the <code>TileEncoderImpl</code> class
@@ -70,91 +67,29 @@ public class JPEGTileEncoder extends TileEncoderImpl {
      * OutputStream.
      * @throws IllegalArgumentException if ras is null.
      */
+    @Override
     public void encode(Raster ras) throws IOException {
-	if(ras == null)
-	    throw new IllegalArgumentException(
-		JaiI18N.getString("TileEncoder1")) ;
+        if(ras == null)
+            throw new IllegalArgumentException(
+                    JaiI18N.getString("TileEncoder1")) ;
 
-	ByteArrayOutputStream baos = new ByteArrayOutputStream() ;
-
-	SampleModel sm = ras.getSampleModel() ;
-
-	JPEGEncodeParam j2dEP = convertToJ2DJPEGEncodeParam(paramList, sm) ;
-        ((JPEGParam)j2dEP).setWidth(ras.getWidth()) ; 
-	((JPEGParam)j2dEP).setHeight(ras.getHeight()) ;
-
-	JPEGImageEncoder encoder = JPEGCodec.createJPEGEncoder(baos, j2dEP) ;
-	encoder.encode(ras) ;
-
-	byte[] data = baos.toByteArray() ;
-
-	ObjectOutputStream oos = new ObjectOutputStream(outputStream) ;
-	oos.writeFloat(paramList.getFloatParameter("quality"));
-	oos.writeBoolean(paramList.getBooleanParameter("qualitySet"));
-	oos.writeObject(TileCodecUtils.serializeSampleModel(sm));
-
-	Point location = new Point( ras.getMinX(), ras.getMinY() ) ;
-	oos.writeObject( location ) ;
-
-	oos.writeObject( data ) ;
-	oos.close() ;
-    }
-
-    private JPEGEncodeParam convertToJ2DJPEGEncodeParam(
-	TileCodecParameterList paramList, SampleModel sm) {
-
-        if(sm == null)
-            return null ;
-
-        int nbands = sm.getNumBands() ;
-
-        JPEGParam j2dJP = createDefaultJ2DJPEGEncodeParam(nbands) ;
-
-        int[] hSubSamp
-            = (int[])paramList.getObjectParameter("horizontalSubsampling") ;
-        int[] vSubSamp
-            = (int[])paramList.getObjectParameter("verticalSubsampling") ;
-        int[] qTabSlot
-            = (int[])paramList.getObjectParameter("quantizationTableMapping") ;
-
-        for(int i=0; i<nbands; i++) {
-            j2dJP.setHorizontalSubsampling(i, hSubSamp[i]) ;
-            j2dJP.setVerticalSubsampling(i, vSubSamp[i]) ;
-
-            int[] qTab
-                 = (int[]) paramList.getObjectParameter("quantizationTable"+i) ;
-	    if(qTab != null && 
-	       qTab.equals(ParameterListDescriptor.NO_PARAMETER_DEFAULT)){ 
-		j2dJP.setQTableComponentMapping(i, qTabSlot[i]) ;
-		j2dJP.setQTable(qTabSlot[i], new JPEGQTable(qTab)) ;
-	    }
+        ImageWriter writer = null;
+        Iterator<ImageWriter> iter = ImageIO.getImageWritersByFormatName("jpeg");
+        while (iter.hasNext()) {
+            writer = iter.next();
         }
-
+        assert writer != null;
+        ImageWriteParam param = writer.getDefaultWriteParam();
         if(paramList.getBooleanParameter("qualitySet")) {
+            param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
             float quality = paramList.getFloatParameter("quality") ;
-            j2dJP.setQuality(quality, true) ;
+            param.setCompressionQuality(quality);
         }
-
-        int rInt = paramList.getIntParameter("restartInterval") ;
-        j2dJP.setRestartInterval(rInt) ;
-
-        j2dJP.setImageInfoValid(paramList.getBooleanParameter("writeImageInfo")) ;
-        j2dJP.setTableInfoValid(paramList.getBooleanParameter("writeTableInfo")) ;
-
-        if(paramList.getBooleanParameter("writeJFIFHeader")) {
-            j2dJP.setMarkerData(JPEGEncodeParam.APP0_MARKER, null) ;
-        }
-
-        return (JPEGEncodeParam)j2dJP ;
-    }
-
-    private JPEGParam createDefaultJ2DJPEGEncodeParam(int nbands){
-        if(nbands == 1)
-            return new JPEGParam(JPEGEncodeParam.COLOR_ID_GRAY, 1) ;
-        if(nbands == 3)
-            return new JPEGParam(JPEGEncodeParam.COLOR_ID_YCbCr, 3) ;
-        if(nbands == 4)
-            return new JPEGParam(JPEGEncodeParam.COLOR_ID_CMYK, 4) ;
-	return null ;
+        ImageOutputStream ios = ImageIO.createImageOutputStream(outputStream);
+        writer.setOutput(ios);
+        IIOImage iioImage = new IIOImage(ras, null, null);
+        writer.write(null, iioImage, param);
+        ios.close();
+        writer.dispose();
     }
 }

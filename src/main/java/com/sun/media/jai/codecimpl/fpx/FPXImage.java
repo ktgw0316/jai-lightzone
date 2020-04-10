@@ -10,34 +10,24 @@
  * $State: Exp $
  */
 package com.sun.media.jai.codecimpl.fpx;
-import java.awt.Point;
-import java.awt.Transparency;
+
+import com.sun.media.jai.codec.*;
+import com.sun.media.jai.codecimpl.ImagingListenerProxy;
+import com.sun.media.jai.codecimpl.JPEGCodec;
+import com.sun.media.jai.codecimpl.SimpleRenderedImage;
+import com.sun.media.jai.codecimpl.util.RasterFactory;
+
+import java.awt.*;
 import java.awt.color.ColorSpace;
 import java.awt.image.ComponentColorModel;
 import java.awt.image.DataBuffer;
 import java.awt.image.DataBufferByte;
 import java.awt.image.Raster;
 import java.io.ByteArrayInputStream;
-import java.io.InputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Enumeration;
 import java.util.Hashtable;
-import com.sun.media.jai.codec.ImageCodec;
-import com.sun.media.jai.codec.FPXDecodeParam;
-import com.sun.media.jai.codec.SeekableStream;
-import com.sun.media.jai.codecimpl.SimpleRenderedImage;
-import com.sun.media.jai.codecimpl.util.RasterFactory;
-
-import com.sun.image.codec.jpeg.JPEGCodec;
-import com.sun.image.codec.jpeg.JPEGDecodeParam;
-import com.sun.image.codec.jpeg.JPEGImageDecoder;
-import com.sun.media.jai.codecimpl.ImagingListenerProxy;
-import com.sun.media.jai.codec.FPXDecodeParam;
-import com.sun.media.jai.codec.ImageCodec;
-import com.sun.media.jai.codec.SeekableStream;
-import com.sun.media.jai.codecimpl.ImagingListenerProxy;
-import com.sun.media.jai.codecimpl.SimpleRenderedImage;
-import com.sun.media.jai.codecimpl.util.RasterFactory;
 
 public class FPXImage extends SimpleRenderedImage {
 
@@ -590,22 +580,22 @@ public class FPXImage extends SimpleRenderedImage {
         int conversion = (subtype >> 16) & 0xff;
         int table = (subtype >> 24) & 0xff;
 
-        JPEGImageDecoder dec;
-        JPEGDecodeParam param = null;
+        ImageDecoder dec;
+        ImageDecodeParam param = null;
 
         if (table != 0) {
             InputStream tableStream =
                 new ByteArrayInputStream(JPEGTable[table]);
-            dec = JPEGCodec.createJPEGDecoder(tableStream);
+            dec = JPEGCodec.createImageDecoder(null, tableStream, param);
             Raster junk = dec.decodeAsRaster();
-            param = dec.getJPEGDecodeParam();
+            param = (JPEGDecodeParam) dec.getParam();
         }
 
         subimageDataStream.seek(getTileOffset(tileIndex));
         if (param != null) {
-            dec = JPEGCodec.createJPEGDecoder(subimageDataStream, param);
+            dec = JPEGCodec.createImageDecoder(null, subimageDataStream, param);
         } else {
-            dec = JPEGCodec.createJPEGDecoder(subimageDataStream);
+            dec = JPEGCodec.createImageDecoder(null, subimageDataStream, param);
         }
         Raster ras = dec.decodeAsRaster().createTranslatedChild(tx, ty);
 

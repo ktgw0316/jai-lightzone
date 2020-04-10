@@ -10,21 +10,17 @@
  * $State: Exp $
  */
 package com.sun.media.jai.codecimpl;
-import java.awt.Point;
-import java.awt.Rectangle;
-import java.awt.Transparency;
+
+import com.sun.media.jai.codec.*;
+import com.sun.media.jai.codecimpl.util.DataBufferFloat;
+import com.sun.media.jai.codecimpl.util.FloatDoubleColorModel;
+import com.sun.media.jai.codecimpl.util.ImagingException;
+import com.sun.media.jai.codecimpl.util.RasterFactory;
+import com.sun.media.jai.util.SimpleCMYKColorSpace;
+
+import java.awt.*;
 import java.awt.color.ColorSpace;
-import java.awt.image.DataBuffer;
-import java.awt.image.DataBufferByte;
-import java.awt.image.DataBufferShort;
-import java.awt.image.DataBufferUShort;
-import java.awt.image.DataBufferInt;
-import java.awt.image.Raster;
-import java.awt.image.WritableRaster;
-import java.awt.image.SampleModel;
-import java.awt.image.IndexColorModel;
-import java.awt.image.MultiPixelPackedSampleModel;
-import java.awt.image.ComponentColorModel;
+import java.awt.image.*;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -32,26 +28,6 @@ import java.text.MessageFormat;
 import java.util.Locale;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
-import com.sun.media.jai.codec.ImageCodec;
-import com.sun.media.jai.codec.SeekableStream;
-import com.sun.media.jai.codec.TIFFDecodeParam;
-import com.sun.media.jai.codec.TIFFDirectory;
-import com.sun.media.jai.codec.TIFFField;
-import com.sun.media.jai.codecimpl.util.DataBufferFloat;
-import com.sun.media.jai.codecimpl.util.FloatDoubleColorModel;
-import com.sun.media.jai.codecimpl.util.RasterFactory;
-import com.sun.image.codec.jpeg.JPEGCodec;
-import com.sun.image.codec.jpeg.JPEGDecodeParam;
-import com.sun.image.codec.jpeg.JPEGImageDecoder;
-import com.sun.media.jai.codecimpl.ImagingListenerProxy;
-import com.sun.media.jai.codecimpl.util.ImagingException;
-import com.sun.media.jai.util.SimpleCMYKColorSpace;
-import com.sun.media.jai.codec.*;
-import com.sun.media.jai.codecimpl.util.DataBufferFloat;
-import com.sun.media.jai.codecimpl.util.FloatDoubleColorModel;
-import com.sun.media.jai.codecimpl.util.ImagingException;
-import com.sun.media.jai.codecimpl.util.RasterFactory;
-import com.sun.media.jai.util.SimpleCMYKColorSpace;
 
 public class TIFFImage extends SimpleRenderedImage {
 
@@ -107,7 +83,7 @@ public class TIFFImage extends SimpleRenderedImage {
     int predictor;
 
     // TTN2 JPEG related variables
-    JPEGDecodeParam decodeParam = null;
+    ImageDecodeParam decodeParam = null;
     boolean colorConvertJPEG = false;
 
     // DEFLATE variables
@@ -138,31 +114,34 @@ public class TIFFImage extends SimpleRenderedImage {
      * @param minX the X position of the returned Raster.
      * @param minY the Y position of the returned Raster.
      */
-    private static final Raster decodeJPEG(byte[] data,
-                                           JPEGDecodeParam decodeParam,
-                                           boolean colorConvert,
-                                           int minX,
-                                           int minY) {
+    private static Raster decodeJPEG(byte[] data,
+                                     ImageDecodeParam decodeParam,
+                                     boolean colorConvert,
+                                     int minX,
+                                     int minY) {
         // Create an InputStream from the compressed data array.
         ByteArrayInputStream jpegStream = new ByteArrayInputStream(data);
 
         // Create a decoder.
-        JPEGImageDecoder decoder = decodeParam == null ?
-            JPEGCodec.createJPEGDecoder(jpegStream) :
-            JPEGCodec.createJPEGDecoder(jpegStream,
-                                        decodeParam);
+        ImageDecoder decoder =
+                JPEGCodec.createImageDecoder(null, jpegStream, decodeParam);
 
         // Decode the compressed data into a Raster.
         Raster jpegRaster = null;
         try {
-            jpegRaster = colorConvert ?
-                decoder.decodeAsBufferedImage().getWritableTile(0, 0) :
-                decoder.decodeAsRaster();
+            jpegRaster = decoder.decodeAsRaster();
+            if (colorConvert) {
+                WritableRaster ras = jpegRaster.createCompatibleWritableRaster();
+                RenderedImage ri = decoder.decodeAsRenderedImage();
+                ColorModel cm = ri.getColorModel();
+                BufferedImage bi = new BufferedImage(cm, ras, cm.isAlphaPremultiplied(), null);
+                jpegRaster = bi.getWritableTile(0, 0);
+            }
         } catch (IOException ioe) {
             String message = JaiI18N.getString("TIFFImage13");
             ImagingListenerProxy.errorOccurred(message,
-                                   new ImagingException(message, ioe),
-                                   TIFFImage.class, false);
+                    new ImagingException(message, ioe),
+                    TIFFImage.class, false);
 //            throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
         }
 
@@ -181,8 +160,8 @@ public class TIFFImage extends SimpleRenderedImage {
         } catch(DataFormatException dfe) {
             String message = JaiI18N.getString("TIFFImage17");
             ImagingListenerProxy.errorOccurred(message,
-                                   new ImagingException(message, dfe),
-                                   this, false);
+                    new ImagingException(message, dfe),
+                    this, false);
 //            throw new RuntimeException(JaiI18N.getString("TIFFImage17")+": "+
 //                                       dfe.getMessage());
         }
@@ -194,12 +173,12 @@ public class TIFFImage extends SimpleRenderedImage {
      * to work around a cast exception when using JAI with float data.
      */
     private final static SampleModel
-        createPixelInterleavedSampleModel(int dataType,
-                                          int tileWidth,
-                                          int tileHeight,
-                                          int pixelStride,
-                                          int scanlineStride,
-                                          int bandOffsets[]) {
+    createPixelInterleavedSampleModel(int dataType,
+                                      int tileWidth,
+                                      int tileHeight,
+                                      int pixelStride,
+                                      int scanlineStride,
+                                      int bandOffsets[]) {
         SampleModel sampleModel = null;
 
         if(dataType == DataBuffer.TYPE_FLOAT) {
@@ -209,20 +188,20 @@ public class TIFFImage extends SimpleRenderedImage {
             // DataBufferFloat.
             try {
                 Class rfClass =
-                    Class.forName("javax.media.jai.RasterFactory");
+                        Class.forName("javax.media.jai.RasterFactory");
                 Class[] paramTypes = new Class[] {int.class, int.class,
-                                                  int.class, int.class,
-                                                  int.class, int[].class};
+                        int.class, int.class,
+                        int.class, int[].class};
                 Method rfMthd =
-                    rfClass.getMethod("createPixelInterleavedSampleModel",
-                                      paramTypes);
+                        rfClass.getMethod("createPixelInterleavedSampleModel",
+                                paramTypes);
                 Object[] params =
-                    new Object[] {new Integer(dataType),
-                                  new Integer(tileWidth),
-                                  new Integer(tileHeight),
-                                  new Integer(pixelStride),
-                                  new Integer(scanlineStride),
-                                  bandOffsets};
+                        new Object[] {new Integer(dataType),
+                                new Integer(tileWidth),
+                                new Integer(tileHeight),
+                                new Integer(pixelStride),
+                                new Integer(scanlineStride),
+                                bandOffsets};
                 sampleModel = (SampleModel)rfMthd.invoke(null, params);
             } catch(Exception e) {
                 // Deliberately ignore the Exception.
@@ -234,12 +213,12 @@ public class TIFFImage extends SimpleRenderedImage {
         // if and only if the decoder is being used without JAI.
         if(dataType != DataBuffer.TYPE_FLOAT || sampleModel == null) {
             sampleModel =
-                RasterFactory.createPixelInterleavedSampleModel(dataType,
-                                                                tileWidth,
-                                                                tileHeight,
-                                                                pixelStride,
-                                                                scanlineStride,
-                                                                bandOffsets);
+                    RasterFactory.createPixelInterleavedSampleModel(dataType,
+                            tileWidth,
+                            tileHeight,
+                            pixelStride,
+                            scanlineStride,
+                            bandOffsets);
         }
 
         return sampleModel;
@@ -275,11 +254,11 @@ public class TIFFImage extends SimpleRenderedImage {
         TIFFField field = dir.getField(tagID);
         if (field == null) {
             MessageFormat mf =
-                new MessageFormat(JaiI18N.getString("TIFFImage5"));
+                    new MessageFormat(JaiI18N.getString("TIFFImage5"));
             mf.setLocale(Locale.getDefault());
             throw new RuntimeException(mf.format(new Object[] {tagName}));
         } else {
-	    return field;
+            return field;
         }
     }
 
@@ -295,44 +274,44 @@ public class TIFFImage extends SimpleRenderedImage {
     public TIFFImage(SeekableStream stream,
                      TIFFDecodeParam param,
                      int directory)
-        throws IOException {
+            throws IOException {
 
         this.stream = stream;
-	if (param == null) {
-	    param = new TIFFDecodeParam();
-	}
+        if (param == null) {
+            param = new TIFFDecodeParam();
+        }
 
-	decodePaletteAsShorts = param.getDecodePaletteAsShorts();
+        decodePaletteAsShorts = param.getDecodePaletteAsShorts();
 
         // Read the specified directory.
         TIFFDirectory dir = param.getIFDOffset() == null ?
-            new TIFFDirectory(stream, directory) :
-            new TIFFDirectory(stream, param.getIFDOffset().longValue(),
-                              directory);
+                new TIFFDirectory(stream, directory) :
+                new TIFFDirectory(stream, param.getIFDOffset().longValue(),
+                        directory);
 
         // Set a property "tiff_directory".
         properties.put("tiff_directory", dir);
 
-	// Get the number of samples per pixel
-	TIFFField sfield =
-	    dir.getField(TIFFImageDecoder.TIFF_SAMPLES_PER_PIXEL);
+        // Get the number of samples per pixel
+        TIFFField sfield =
+                dir.getField(TIFFImageDecoder.TIFF_SAMPLES_PER_PIXEL);
         int samplesPerPixel = sfield == null ? 1 : (int)sfield.getAsLong(0);
 
-	// Read the TIFF_PLANAR_CONFIGURATION field
-	TIFFField planarConfigurationField =
-	    dir.getField(TIFFImageDecoder.TIFF_PLANAR_CONFIGURATION);
-	char[] planarConfiguration = planarConfigurationField == null ?
-            new char[] {1} :
-            planarConfigurationField.getAsChars();
+        // Read the TIFF_PLANAR_CONFIGURATION field
+        TIFFField planarConfigurationField =
+                dir.getField(TIFFImageDecoder.TIFF_PLANAR_CONFIGURATION);
+        char[] planarConfiguration = planarConfigurationField == null ?
+                new char[] {1} :
+                planarConfigurationField.getAsChars();
 
         // Support planar format (band sequential) only for 1 sample/pixel.
         if (planarConfiguration[0] != 1 && samplesPerPixel != 1) {
             throw new RuntimeException(JaiI18N.getString("TIFFImage0"));
         }
 
-	// Read the TIFF_BITS_PER_SAMPLE field
-	TIFFField bitsField =
-	    dir.getField(TIFFImageDecoder.TIFF_BITS_PER_SAMPLE);
+        // Read the TIFF_BITS_PER_SAMPLE field
+        TIFFField bitsField =
+                dir.getField(TIFFImageDecoder.TIFF_BITS_PER_SAMPLE);
         char[] bitsPerSample = null;
         if(bitsField != null) {
             bitsPerSample = bitsField.getAsChars();
@@ -343,70 +322,70 @@ public class TIFFImage extends SimpleRenderedImage {
             for (int i = 1; i < bitsPerSample.length; i++) {
                 if (bitsPerSample[i] != bitsPerSample[0]) {
                     throw new RuntimeException(
-					     JaiI18N.getString("TIFFImage1"));
+                            JaiI18N.getString("TIFFImage1"));
                 }
             }
         }
         sampleSize = (int)bitsPerSample[0];
 
-	// Read the TIFF_SAMPLE_FORMAT tag to see whether the data might be
-	// signed or floating point
-	TIFFField sampleFormatField =
-	    dir.getField(TIFFImageDecoder.TIFF_SAMPLE_FORMAT);
+        // Read the TIFF_SAMPLE_FORMAT tag to see whether the data might be
+        // signed or floating point
+        TIFFField sampleFormatField =
+                dir.getField(TIFFImageDecoder.TIFF_SAMPLE_FORMAT);
 
         char[] sampleFormat = null;
-	if (sampleFormatField != null) {
-	    sampleFormat = sampleFormatField.getAsChars();
+        if (sampleFormatField != null) {
+            sampleFormat = sampleFormatField.getAsChars();
 
-	    // Check that all the samples have the same format
-	    for (int l=1; l<sampleFormat.length; l++) {
-		if (sampleFormat[l] != sampleFormat[0]) {
-		    throw new RuntimeException(
-					     JaiI18N.getString("TIFFImage2"));
-		}
-	    }
+            // Check that all the samples have the same format
+            for (int l=1; l<sampleFormat.length; l++) {
+                if (sampleFormat[l] != sampleFormat[0]) {
+                    throw new RuntimeException(
+                            JaiI18N.getString("TIFFImage2"));
+                }
+            }
 
-	} else {
-	    sampleFormat = new char[] {1};
-	}
+        } else {
+            sampleFormat = new char[] {1};
+        }
 
         // Set the data type based on the sample size and format.
         boolean isValidDataFormat = false;
         switch(sampleSize) {
-        case 1:
-        case 4:
-        case 8:
-            if(sampleFormat[0] != 3) {
-                // Ignore whether signed or unsigned: treat all as unsigned.
-		dataType = DataBuffer.TYPE_BYTE;
+            case 1:
+            case 4:
+            case 8:
+                if(sampleFormat[0] != 3) {
+                    // Ignore whether signed or unsigned: treat all as unsigned.
+                    dataType = DataBuffer.TYPE_BYTE;
+                    isValidDataFormat = true;
+                }
+                break;
+            case 16:
+                if(sampleFormat[0] != 3) {
+                    dataType = sampleFormat[0] == 2 ?
+                            DataBuffer.TYPE_SHORT : DataBuffer.TYPE_USHORT;
+                    isValidDataFormat = true;
+                }
+                break;
+            case 32:
+                dataType = sampleFormat[0] == 3 ?
+                        DataBuffer.TYPE_FLOAT : DataBuffer.TYPE_INT;
                 isValidDataFormat = true;
-            }
-            break;
-        case 16:
-            if(sampleFormat[0] != 3) {
-                dataType = sampleFormat[0] == 2 ?
-                    DataBuffer.TYPE_SHORT : DataBuffer.TYPE_USHORT;
-                isValidDataFormat = true;
-            }
-            break;
-        case 32:
-            dataType = sampleFormat[0] == 3 ?
-                DataBuffer.TYPE_FLOAT : DataBuffer.TYPE_INT;
-            isValidDataFormat = true;
-            break;
+                break;
         }
 
         if(!isValidDataFormat) {
             throw new RuntimeException(JaiI18N.getString("TIFFImage3"));
         }
 
-	// Figure out what compression if any, is being used.
-	TIFFField compField = dir.getField(TIFFImageDecoder.TIFF_COMPRESSION);
+        // Figure out what compression if any, is being used.
+        TIFFField compField = dir.getField(TIFFImageDecoder.TIFF_COMPRESSION);
         compression = compField == null ? COMP_NONE : compField.getAsInt(0);
 
         // Get the photometric interpretation field.
         TIFFField photoInterpField =
-            dir.getField(TIFFImageDecoder.TIFF_PHOTOMETRIC_INTERPRETATION);
+                dir.getField(TIFFImageDecoder.TIFF_PHOTOMETRIC_INTERPRETATION);
 
         // Set the photometric interpretation variable.
         int photometricType;
@@ -423,8 +402,8 @@ public class TIFFImage extends SimpleRenderedImage {
                 // Bilevel image so most likely a document; switch based
                 // on the compression type of the image.
                 if(compression == COMP_FAX_G3_1D ||
-                   compression == COMP_FAX_G3_2D ||
-                   compression == COMP_FAX_G4_2D) {
+                        compression == COMP_FAX_G3_2D ||
+                        compression == COMP_FAX_G4_2D) {
                     photometricType = 0; // WhiteIsZero
                 } else {
                     photometricType = 1; // BlackIsZero
@@ -440,78 +419,78 @@ public class TIFFImage extends SimpleRenderedImage {
 
         // Determine which kind of image we are dealing with.
         imageType = TYPE_UNSUPPORTED;
-	switch(photometricType) {
-        case 0: // WhiteIsZero
-            isWhiteZero = true;
-        case 1: // BlackIsZero
-            if(sampleSize == 1 && samplesPerPixel == 1) {
-                imageType = TYPE_BILEVEL;
-            } else if(sampleSize == 4 && samplesPerPixel == 1) {
-                imageType = TYPE_GRAY_4BIT;
-            } else if(sampleSize % 8 == 0) {
-                if(samplesPerPixel == 1) {
-                    imageType = TYPE_GRAY;
-                } else if(samplesPerPixel == 2) {
-                    imageType = TYPE_GRAY_ALPHA;
-                } else {
-                    imageType = TYPE_GENERIC;
+        switch(photometricType) {
+            case 0: // WhiteIsZero
+                isWhiteZero = true;
+            case 1: // BlackIsZero
+                if(sampleSize == 1 && samplesPerPixel == 1) {
+                    imageType = TYPE_BILEVEL;
+                } else if(sampleSize == 4 && samplesPerPixel == 1) {
+                    imageType = TYPE_GRAY_4BIT;
+                } else if(sampleSize % 8 == 0) {
+                    if(samplesPerPixel == 1) {
+                        imageType = TYPE_GRAY;
+                    } else if(samplesPerPixel == 2) {
+                        imageType = TYPE_GRAY_ALPHA;
+                    } else {
+                        imageType = TYPE_GENERIC;
+                    }
                 }
-            }
-            break;
-        case 2: // RGB
-            if(sampleSize % 8 == 0) {
-                if(samplesPerPixel == 3) {
-                    imageType = TYPE_RGB;
-                } else if(samplesPerPixel == 4) {
-                    imageType = TYPE_RGB_ALPHA;
-                } else {
-                    imageType = TYPE_GENERIC;
+                break;
+            case 2: // RGB
+                if(sampleSize % 8 == 0) {
+                    if(samplesPerPixel == 3) {
+                        imageType = TYPE_RGB;
+                    } else if(samplesPerPixel == 4) {
+                        imageType = TYPE_RGB_ALPHA;
+                    } else {
+                        imageType = TYPE_GENERIC;
+                    }
                 }
-            }
-            break;
-        case 3: // RGB Palette
-            if(samplesPerPixel == 1 &&
-               (sampleSize == 4 || sampleSize == 8 || sampleSize == 16)) {
-                imageType = TYPE_PALETTE;
-            }
-            break;
-        case 4: // Transparency mask
-            if(sampleSize == 1 && samplesPerPixel == 1) {
-                imageType = TYPE_BILEVEL;
-            }
-            break;
-	case 5: // Separated image, usually CMYK
-	    if (sampleSize == 8 && samplesPerPixel == 4) {
-		imageType = TYPE_CMYK;
-	    }
-        case 6: // YCbCr
-            if(compression == COMP_JPEG_TTN2 &&
-               sampleSize == 8 && samplesPerPixel == 3) {
-                // Set color conversion flag.
-                colorConvertJPEG = param.getJPEGDecompressYCbCrToRGB();
+                break;
+            case 3: // RGB Palette
+                if(samplesPerPixel == 1 &&
+                        (sampleSize == 4 || sampleSize == 8 || sampleSize == 16)) {
+                    imageType = TYPE_PALETTE;
+                }
+                break;
+            case 4: // Transparency mask
+                if(sampleSize == 1 && samplesPerPixel == 1) {
+                    imageType = TYPE_BILEVEL;
+                }
+                break;
+            case 5: // Separated image, usually CMYK
+                if (sampleSize == 8 && samplesPerPixel == 4) {
+                    imageType = TYPE_CMYK;
+                }
+            case 6: // YCbCr
+                if(compression == COMP_JPEG_TTN2 &&
+                        sampleSize == 8 && samplesPerPixel == 3) {
+                    // Set color conversion flag.
+                    colorConvertJPEG = param.getJPEGDecompressYCbCrToRGB();
 
-                // Set type to RGB if color converting.
-                imageType = colorConvertJPEG ? TYPE_RGB : TYPE_GENERIC;
-            } else {
-                TIFFField chromaField = dir.getField(TIFF_YCBCR_SUBSAMPLING);
-                if(chromaField != null) {
-                    chromaSubH = chromaField.getAsInt(0);
-                    chromaSubV = chromaField.getAsInt(1);
+                    // Set type to RGB if color converting.
+                    imageType = colorConvertJPEG ? TYPE_RGB : TYPE_GENERIC;
                 } else {
-                    chromaSubH = chromaSubV = 2;
-                }
+                    TIFFField chromaField = dir.getField(TIFF_YCBCR_SUBSAMPLING);
+                    if(chromaField != null) {
+                        chromaSubH = chromaField.getAsInt(0);
+                        chromaSubV = chromaField.getAsInt(1);
+                    } else {
+                        chromaSubH = chromaSubV = 2;
+                    }
 
-                if(chromaSubH*chromaSubV == 1) {
-                    imageType = TYPE_GENERIC;
-                } else if(sampleSize == 8 && samplesPerPixel == 3) {
-                    imageType = TYPE_YCBCR_SUB;
+                    if(chromaSubH*chromaSubV == 1) {
+                        imageType = TYPE_GENERIC;
+                    } else if(sampleSize == 8 && samplesPerPixel == 3) {
+                        imageType = TYPE_YCBCR_SUB;
+                    }
                 }
-            }
-            break;
-        default: // Other including CIE L*a*b*, unknown.
-            if(sampleSize % 8 == 0) {
-                imageType = TYPE_GENERIC;
-            }
+                break;
+            default: // Other including CIE L*a*b*, unknown.
+                if(sampleSize % 8 == 0) {
+                    imageType = TYPE_GENERIC;
+                }
         }
 
         // Bail out if not one of the supported types.
@@ -519,42 +498,42 @@ public class TIFFImage extends SimpleRenderedImage {
             throw new RuntimeException(JaiI18N.getString("TIFFImage4"));
         }
 
-	// Set basic image layout
+        // Set basic image layout
         minX = minY = 0;
-	width = (int)(getField(dir,
-			       TIFFImageDecoder.TIFF_IMAGE_WIDTH,
-			       "Image Width").getAsLong(0));
+        width = (int)(getField(dir,
+                TIFFImageDecoder.TIFF_IMAGE_WIDTH,
+                "Image Width").getAsLong(0));
 
-	height = (int)(getField(dir,
-				TIFFImageDecoder.TIFF_IMAGE_LENGTH,
-				"Image Length").getAsLong(0));
+        height = (int)(getField(dir,
+                TIFFImageDecoder.TIFF_IMAGE_LENGTH,
+                "Image Length").getAsLong(0));
 
         // Set a preliminary band count. This may be changed later as needed.
         numBands = samplesPerPixel;
 
-	// Figure out if any extra samples are present.
-	TIFFField efield = dir.getField(TIFFImageDecoder.TIFF_EXTRA_SAMPLES);
+        // Figure out if any extra samples are present.
+        TIFFField efield = dir.getField(TIFFImageDecoder.TIFF_EXTRA_SAMPLES);
         int extraSamples = efield == null ? 0 : (int)efield.getAsLong(0);
 
-	if (dir.getField(TIFFImageDecoder.TIFF_TILE_OFFSETS) != null) {
-	    // Image is in tiled format
+        if (dir.getField(TIFFImageDecoder.TIFF_TILE_OFFSETS) != null) {
+            // Image is in tiled format
             isTiled = true;
 
             tileWidth = (int)(getField(dir,
-				       TIFFImageDecoder.TIFF_TILE_WIDTH,
-				       "Tile Width").getAsLong(0));
-	    tileHeight = (int)(getField(dir,
-					TIFFImageDecoder.TIFF_TILE_LENGTH,
-					"Tile Length").getAsLong(0));
-	    tileOffsets =
-		(getField(dir,
-			 TIFFImageDecoder.TIFF_TILE_OFFSETS,
-			 "Tile Offsets")).getAsLongs();
+                    TIFFImageDecoder.TIFF_TILE_WIDTH,
+                    "Tile Width").getAsLong(0));
+            tileHeight = (int)(getField(dir,
+                    TIFFImageDecoder.TIFF_TILE_LENGTH,
+                    "Tile Length").getAsLong(0));
+            tileOffsets =
+                    (getField(dir,
+                            TIFFImageDecoder.TIFF_TILE_OFFSETS,
+                            "Tile Offsets")).getAsLongs();
 
-	    tileByteCounts = getFieldAsLongs(
-	               getField(dir,
-	                        TIFFImageDecoder.TIFF_TILE_BYTE_COUNTS,
-	                        "Tile Byte Counts"));
+            tileByteCounts = getFieldAsLongs(
+                    getField(dir,
+                            TIFFImageDecoder.TIFF_TILE_BYTE_COUNTS,
+                            "Tile Byte Counts"));
 
         } else {
 
@@ -566,51 +545,51 @@ public class TIFFImage extends SimpleRenderedImage {
             // instead of the tile offsets and byte counts. Therefore
             // we default here to the tile dimensions if they are written.
             tileWidth =
-                dir.getField(TIFFImageDecoder.TIFF_TILE_WIDTH) != null ?
-                (int)dir.getFieldAsLong(TIFFImageDecoder.TIFF_TILE_WIDTH) :
-                width;
-	    TIFFField field =
-                dir.getField(TIFFImageDecoder.TIFF_ROWS_PER_STRIP);
-	    if (field == null) {
-		// Default is infinity (2^32 -1), basically the entire image
-		// TODO: Can do a better job of tiling here
-		tileHeight =
-                    dir.getField(TIFFImageDecoder.TIFF_TILE_LENGTH) != null ?
-                    (int)dir.getFieldAsLong(TIFFImageDecoder.TIFF_TILE_LENGTH):
-                    height;
-	    } else {
-		long l = field.getAsLong(0);
-		long infinity = 1;
-		infinity = (infinity << 32) - 1;
-		if (l == infinity || l > height) {
-		    // 2^32 - 1 (effectively infinity, entire image is 1 strip)
+                    dir.getField(TIFFImageDecoder.TIFF_TILE_WIDTH) != null ?
+                            (int)dir.getFieldAsLong(TIFFImageDecoder.TIFF_TILE_WIDTH) :
+                            width;
+            TIFFField field =
+                    dir.getField(TIFFImageDecoder.TIFF_ROWS_PER_STRIP);
+            if (field == null) {
+                // Default is infinity (2^32 -1), basically the entire image
+                // TODO: Can do a better job of tiling here
+                tileHeight =
+                        dir.getField(TIFFImageDecoder.TIFF_TILE_LENGTH) != null ?
+                                (int)dir.getFieldAsLong(TIFFImageDecoder.TIFF_TILE_LENGTH):
+                                height;
+            } else {
+                long l = field.getAsLong(0);
+                long infinity = 1;
+                infinity = (infinity << 32) - 1;
+                if (l == infinity || l > height) {
+                    // 2^32 - 1 (effectively infinity, entire image is 1 strip)
                     // or RowsPerStrip > ImageLength so clamp as having a tile
                     // larger than the image is pointless.
-		    tileHeight = height;
-		} else {
-		    tileHeight = (int)l;
-		}
-	    }
+                    tileHeight = height;
+                } else {
+                    tileHeight = (int)l;
+                }
+            }
 
-	    TIFFField tileOffsetsField =
-		getField(dir,
-			 TIFFImageDecoder.TIFF_STRIP_OFFSETS,
-			 "Strip Offsets");
-	    tileOffsets = getFieldAsLongs(tileOffsetsField);
+            TIFFField tileOffsetsField =
+                    getField(dir,
+                            TIFFImageDecoder.TIFF_STRIP_OFFSETS,
+                            "Strip Offsets");
+            tileOffsets = getFieldAsLongs(tileOffsetsField);
 
-	    TIFFField tileByteCountsField =
-                dir.getField(TIFFImageDecoder.TIFF_STRIP_BYTE_COUNTS);
+            TIFFField tileByteCountsField =
+                    dir.getField(TIFFImageDecoder.TIFF_STRIP_BYTE_COUNTS);
             if(tileByteCountsField == null) {
                 // Attempt to infer the number of bytes in each strip.
                 int totalBytes = ((sampleSize+7)/8)*numBands*width*height;
                 int bytesPerStrip =
-                    ((sampleSize+7)/8)*numBands*width*tileHeight;
+                        ((sampleSize+7)/8)*numBands*width*tileHeight;
                 int cumulativeBytes = 0;
                 tileByteCounts = new long[tileOffsets.length];
                 for(int i = 0; i < tileOffsets.length; i++) {
                     tileByteCounts[i] =
-                        Math.min(totalBytes - cumulativeBytes,
-                                 bytesPerStrip);
+                            Math.min(totalBytes - cumulativeBytes,
+                                    bytesPerStrip);
                     cumulativeBytes += bytesPerStrip;
                 }
 
@@ -626,315 +605,315 @@ public class TIFFImage extends SimpleRenderedImage {
             // Uncompressed image provided in a single tile: clamp to max bytes.
             int maxBytes = width*height*numBands*((sampleSize + 7)/8);
             if(tileByteCounts.length == 1 &&
-               compression == COMP_NONE &&
-               tileByteCounts[0] > maxBytes) {
+                    compression == COMP_NONE &&
+                    tileByteCounts[0] > maxBytes) {
                 tileByteCounts[0] = maxBytes;
             }
-	}
+        }
 
-	// Calculate number of tiles and the tileSize in bytes
+        // Calculate number of tiles and the tileSize in bytes
         tilesX = (width + tileWidth - 1)/tileWidth;
         tilesY = (height + tileHeight - 1)/tileHeight;
         tileSize = tileWidth * tileHeight * numBands;
 
-	// Check whether big endian or little endian format is used.
-	isBigEndian = dir.isBigEndian();
+        // Check whether big endian or little endian format is used.
+        isBigEndian = dir.isBigEndian();
 
-	TIFFField fillOrderField =
-	    dir.getField(TIFFImageDecoder.TIFF_FILL_ORDER);
-	if (fillOrderField != null) {
-	    fillOrder = fillOrderField.getAsInt(0);
-	} else {
-	    // Default Fill Order
-	    fillOrder = 1;
-	}
+        TIFFField fillOrderField =
+                dir.getField(TIFFImageDecoder.TIFF_FILL_ORDER);
+        if (fillOrderField != null) {
+            fillOrder = fillOrderField.getAsInt(0);
+        } else {
+            // Default Fill Order
+            fillOrder = 1;
+        }
 
-	switch(compression) {
-        case COMP_NONE:
-        case COMP_PACKBITS:
-            // Do nothing.
-            break;
-        case COMP_DEFLATE:
-            inflater = new Inflater();
-            break;
-        case COMP_FAX_G3_1D:
-        case COMP_FAX_G3_2D:
-        case COMP_FAX_G4_2D:
-            if(sampleSize != 1) {
-                throw new RuntimeException(JaiI18N.getString("TIFFImage7"));
-            }
+        switch(compression) {
+            case COMP_NONE:
+            case COMP_PACKBITS:
+                // Do nothing.
+                break;
+            case COMP_DEFLATE:
+                inflater = new Inflater();
+                break;
+            case COMP_FAX_G3_1D:
+            case COMP_FAX_G3_2D:
+            case COMP_FAX_G4_2D:
+                if(sampleSize != 1) {
+                    throw new RuntimeException(JaiI18N.getString("TIFFImage7"));
+                }
 
-            // Fax T.4 compression options
-            if (compression == 3) {
-                TIFFField t4OptionsField =
-                    dir.getField(TIFFImageDecoder.TIFF_T4_OPTIONS);
-                if (t4OptionsField != null) {
-                    tiffT4Options = t4OptionsField.getAsLong(0);
+                // Fax T.4 compression options
+                if (compression == 3) {
+                    TIFFField t4OptionsField =
+                            dir.getField(TIFFImageDecoder.TIFF_T4_OPTIONS);
+                    if (t4OptionsField != null) {
+                        tiffT4Options = t4OptionsField.getAsLong(0);
+                    } else {
+                        // Use default value
+                        tiffT4Options = 0;
+                    }
+                }
+
+                // Fax T.6 compression options
+                if (compression == 4) {
+                    TIFFField t6OptionsField =
+                            dir.getField(TIFFImageDecoder.TIFF_T6_OPTIONS);
+                    if (t6OptionsField != null) {
+                        tiffT6Options = t6OptionsField.getAsLong(0);
+                    } else {
+                        // Use default value
+                        tiffT6Options = 0;
+                    }
+                }
+
+                // Fax encoding, need to create the Fax decoder.
+                decoder = new TIFFFaxDecoder(fillOrder,
+                        tileWidth, tileHeight);
+                break;
+
+            case COMP_LZW:
+                // LZW compression used, need to create the LZW decoder.
+                TIFFField predictorField =
+                        dir.getField(TIFFImageDecoder.TIFF_PREDICTOR);
+
+                if (predictorField == null) {
+                    predictor = 1;
                 } else {
-                    // Use default value
-                    tiffT4Options = 0;
-                }
-            }
+                    predictor = predictorField.getAsInt(0);
 
-            // Fax T.6 compression options
-            if (compression == 4) {
-                TIFFField t6OptionsField =
-                    dir.getField(TIFFImageDecoder.TIFF_T6_OPTIONS);
-                if (t6OptionsField != null) {
-                    tiffT6Options = t6OptionsField.getAsLong(0);
-                } else {
-                    // Use default value
-                    tiffT6Options = 0;
-                }
-            }
+                    if (predictor != 1 && predictor != 2) {
+                        throw new RuntimeException(JaiI18N.getString("TIFFImage8"));
+                    }
 
-            // Fax encoding, need to create the Fax decoder.
-            decoder = new TIFFFaxDecoder(fillOrder,
-                                         tileWidth, tileHeight);
-            break;
-
-        case COMP_LZW:
-            // LZW compression used, need to create the LZW decoder.
-            TIFFField predictorField =
-                dir.getField(TIFFImageDecoder.TIFF_PREDICTOR);
-
-            if (predictorField == null) {
-                predictor = 1;
-            } else {
-                predictor = predictorField.getAsInt(0);
-
-                if (predictor != 1 && predictor != 2) {
-                    throw new RuntimeException(JaiI18N.getString("TIFFImage8"));
+                    if (predictor == 2 && sampleSize != 8) {
+                        throw new RuntimeException(sampleSize +
+                                JaiI18N.getString("TIFFImage9"));
+                    }
                 }
 
-                if (predictor == 2 && sampleSize != 8) {
-                    throw new RuntimeException(sampleSize +
-                                               JaiI18N.getString("TIFFImage9"));
+                lzwDecoder = new TIFFLZWDecoder(tileWidth, predictor,
+                        samplesPerPixel);
+                break;
+
+            case COMP_JPEG_OLD:
+                throw new RuntimeException(JaiI18N.getString("TIFFImage15"));
+
+            case COMP_JPEG_TTN2:
+                if(!(sampleSize == 8 &&
+                        ((imageType == TYPE_GRAY && samplesPerPixel == 1) ||
+                                (imageType == TYPE_PALETTE && samplesPerPixel == 1) ||
+                                (imageType == TYPE_RGB && samplesPerPixel == 3)))) {
+                    throw new RuntimeException(JaiI18N.getString("TIFFImage16"));
                 }
-            }
 
-            lzwDecoder = new TIFFLZWDecoder(tileWidth, predictor,
-                                            samplesPerPixel);
-            break;
+                // Create decodeParam from JPEGTables field if present.
+                if(dir.isTagPresent(TIFF_JPEG_TABLES)) {
+                    TIFFField jpegTableField = dir.getField(TIFF_JPEG_TABLES);
+                    byte[] jpegTable = jpegTableField.getAsBytes();
+                    ByteArrayInputStream tableStream =
+                            new ByteArrayInputStream(jpegTable);
+                    ImageDecoder decoder =
+                            JPEGCodec.createImageDecoder(null, tableStream, null);
+                    decoder.decodeAsRaster();
+                    decodeParam = decoder.getParam();
+                }
 
-        case COMP_JPEG_OLD:
-            throw new RuntimeException(JaiI18N.getString("TIFFImage15"));
-
-        case COMP_JPEG_TTN2:
-            if(!(sampleSize == 8 &&
-                 ((imageType == TYPE_GRAY && samplesPerPixel == 1) ||
-                  (imageType == TYPE_PALETTE && samplesPerPixel == 1) ||
-                  (imageType == TYPE_RGB && samplesPerPixel == 3)))) {
-                throw new RuntimeException(JaiI18N.getString("TIFFImage16"));
-            }
-
-            // Create decodeParam from JPEGTables field if present.
-            if(dir.isTagPresent(TIFF_JPEG_TABLES)) {
-                TIFFField jpegTableField = dir.getField(TIFF_JPEG_TABLES);
-                byte[] jpegTable = jpegTableField.getAsBytes();
-                ByteArrayInputStream tableStream =
-                    new ByteArrayInputStream(jpegTable);
-                JPEGImageDecoder decoder =
-                    JPEGCodec.createJPEGDecoder(tableStream);
-                decoder.decodeAsRaster();
-                decodeParam = decoder.getJPEGDecodeParam();
-            }
-
-            break;
-        default:
-            throw new RuntimeException(JaiI18N.getString("TIFFImage10"));
-	}
+                break;
+            default:
+                throw new RuntimeException(JaiI18N.getString("TIFFImage10"));
+        }
 
         switch(imageType) {
-        case TYPE_BILEVEL:
-        case TYPE_GRAY_4BIT:
-            sampleModel =
-                new MultiPixelPackedSampleModel(dataType,
-                                                tileWidth,
-                                                tileHeight,
-                                                sampleSize);
-            if(imageType == TYPE_BILEVEL) {
-                byte[] map = new byte[] {(byte)(isWhiteZero ? 255 : 0),
-                                         (byte)(isWhiteZero ? 0 : 255)};
-		colorModel = new IndexColorModel(1, 2, map, map, map);
-            } else {
-                colorModel =
-                    ImageCodec.createGrayIndexColorModel(sampleModel,
-                                                         !isWhiteZero);
-            }
-            break;
-
-        case TYPE_GRAY:
-        case TYPE_GRAY_ALPHA:
-        case TYPE_RGB:
-        case TYPE_RGB_ALPHA:
-	case TYPE_CMYK:
-            // Create a pixel interleaved SampleModel with decreasing
-            // band offsets.
-            int[] RGBOffsets = new int[numBands];
-            if(compression == COMP_JPEG_TTN2) {
-                for (int i=0; i<numBands; i++) {
-                    RGBOffsets[i] = numBands - 1 - i;
+            case TYPE_BILEVEL:
+            case TYPE_GRAY_4BIT:
+                sampleModel =
+                        new MultiPixelPackedSampleModel(dataType,
+                                tileWidth,
+                                tileHeight,
+                                sampleSize);
+                if(imageType == TYPE_BILEVEL) {
+                    byte[] map = new byte[] {(byte)(isWhiteZero ? 255 : 0),
+                            (byte)(isWhiteZero ? 0 : 255)};
+                    colorModel = new IndexColorModel(1, 2, map, map, map);
+                } else {
+                    colorModel =
+                            ImageCodec.createGrayIndexColorModel(sampleModel,
+                                    !isWhiteZero);
                 }
-            } else {
-                for (int i=0; i<numBands; i++) {
-                    RGBOffsets[i] = i;
+                break;
+
+            case TYPE_GRAY:
+            case TYPE_GRAY_ALPHA:
+            case TYPE_RGB:
+            case TYPE_RGB_ALPHA:
+            case TYPE_CMYK:
+                // Create a pixel interleaved SampleModel with decreasing
+                // band offsets.
+                int[] RGBOffsets = new int[numBands];
+                if(compression == COMP_JPEG_TTN2) {
+                    for (int i=0; i<numBands; i++) {
+                        RGBOffsets[i] = numBands - 1 - i;
+                    }
+                } else {
+                    for (int i=0; i<numBands; i++) {
+                        RGBOffsets[i] = i;
+                    }
                 }
-            }
-            sampleModel = createPixelInterleavedSampleModel(dataType,
-                                                            tileWidth,
-                                                            tileHeight,
-                                                            numBands,
-                                                            numBands*tileWidth,
-                                                            RGBOffsets);
+                sampleModel = createPixelInterleavedSampleModel(dataType,
+                        tileWidth,
+                        tileHeight,
+                        numBands,
+                        numBands*tileWidth,
+                        RGBOffsets);
 
-            if(imageType == TYPE_GRAY || imageType == TYPE_RGB) {
-                colorModel =
-                    ImageCodec.createComponentColorModel(sampleModel);
-            } else if (imageType == TYPE_CMYK) {
-		colorModel = ImageCodec.createComponentColorModel(sampleModel,
-								  SimpleCMYKColorSpace.getInstance());
-	    } else { // hasAlpha
-                // Transparency.OPAQUE signifies image data that is
-                // completely opaque, meaning that all pixels have an alpha
-                // value of 1.0. So the extra band gets ignored, which is
-                // what we want.
-                int transparency = Transparency.OPAQUE;
-                if(extraSamples == 1 || extraSamples == 2) { 
-		    // associated (premultiplied) alpha when == 1
-		    // unassociated alpha when ==2
-		    // Fix bug: 4699316
-                    transparency = Transparency.TRANSLUCENT;
-                } 
+                if(imageType == TYPE_GRAY || imageType == TYPE_RGB) {
+                    colorModel =
+                            ImageCodec.createComponentColorModel(sampleModel);
+                } else if (imageType == TYPE_CMYK) {
+                    colorModel = ImageCodec.createComponentColorModel(sampleModel,
+                            SimpleCMYKColorSpace.getInstance());
+                } else { // hasAlpha
+                    // Transparency.OPAQUE signifies image data that is
+                    // completely opaque, meaning that all pixels have an alpha
+                    // value of 1.0. So the extra band gets ignored, which is
+                    // what we want.
+                    int transparency = Transparency.OPAQUE;
+                    if(extraSamples == 1 || extraSamples == 2) {
+                        // associated (premultiplied) alpha when == 1
+                        // unassociated alpha when ==2
+                        // Fix bug: 4699316
+                        transparency = Transparency.TRANSLUCENT;
+                    }
 
-                colorModel =
-                    createAlphaComponentColorModel(dataType,
-                                                   numBands,
-                                                   extraSamples == 1,
-						   transparency);
-            }
-            break;
+                    colorModel =
+                            createAlphaComponentColorModel(dataType,
+                                    numBands,
+                                    extraSamples == 1,
+                                    transparency);
+                }
+                break;
 
-        case TYPE_GENERIC:
-        case TYPE_YCBCR_SUB:
-            // For this case we can't display the image, so we create a
-            // SampleModel with increasing bandOffsets, and keep the
-            // ColorModel as null, as there is no appropriate ColorModel.
+            case TYPE_GENERIC:
+            case TYPE_YCBCR_SUB:
+                // For this case we can't display the image, so we create a
+                // SampleModel with increasing bandOffsets, and keep the
+                // ColorModel as null, as there is no appropriate ColorModel.
 
-            int[] bandOffsets = new int[numBands];
-            for (int i=0; i<numBands; i++) {
-                bandOffsets[i] = i;
-            }
+                int[] bandOffsets = new int[numBands];
+                for (int i=0; i<numBands; i++) {
+                    bandOffsets[i] = i;
+                }
 
-            sampleModel =
-                createPixelInterleavedSampleModel(dataType,
-                                                  tileWidth, tileHeight,
-                                                  numBands, numBands * tileWidth,
-                                                  bandOffsets);
-            colorModel = null;
-            break;
+                sampleModel =
+                        createPixelInterleavedSampleModel(dataType,
+                                tileWidth, tileHeight,
+                                numBands, numBands * tileWidth,
+                                bandOffsets);
+                colorModel = null;
+                break;
 
-        case TYPE_PALETTE:
-	    // Get the colormap
-	    TIFFField cfield = getField(dir, TIFFImageDecoder.TIFF_COLORMAP,
-					"Colormap");
-	    colormap = cfield.getAsChars();
+            case TYPE_PALETTE:
+                // Get the colormap
+                TIFFField cfield = getField(dir, TIFFImageDecoder.TIFF_COLORMAP,
+                        "Colormap");
+                colormap = cfield.getAsChars();
 
-	    // Could be either 1 or 3 bands depending on whether we use
-	    // IndexColorModel or not.
-	    if (decodePaletteAsShorts) {
-		numBands = 3;
+                // Could be either 1 or 3 bands depending on whether we use
+                // IndexColorModel or not.
+                if (decodePaletteAsShorts) {
+                    numBands = 3;
 
-		// If no SampleFormat tag was specified and if the
-		// sampleSize is less than or equal to 8, then the
-		// dataType was initially set to byte, but now we want to
-		// expand the palette as shorts, so the dataType should
-		// be ushort.
-		if (dataType == DataBuffer.TYPE_BYTE) {
-		    dataType = DataBuffer.TYPE_USHORT;
-		}
+                    // If no SampleFormat tag was specified and if the
+                    // sampleSize is less than or equal to 8, then the
+                    // dataType was initially set to byte, but now we want to
+                    // expand the palette as shorts, so the dataType should
+                    // be ushort.
+                    if (dataType == DataBuffer.TYPE_BYTE) {
+                        dataType = DataBuffer.TYPE_USHORT;
+                    }
 
-		// Data will have to be unpacked into a 3 band short image
-		// as we do not have a IndexColorModel that can deal with
-		// a colormodel whose entries are of short data type.
-		sampleModel =
-		    RasterFactory.createPixelInterleavedSampleModel(dataType,
-								    tileWidth,
-								    tileHeight,
-								    numBands);
-		colorModel = ImageCodec.createComponentColorModel(sampleModel);
+                    // Data will have to be unpacked into a 3 band short image
+                    // as we do not have a IndexColorModel that can deal with
+                    // a colormodel whose entries are of short data type.
+                    sampleModel =
+                            RasterFactory.createPixelInterleavedSampleModel(dataType,
+                                    tileWidth,
+                                    tileHeight,
+                                    numBands);
+                    colorModel = ImageCodec.createComponentColorModel(sampleModel);
 
-	    } else {
+                } else {
 
-		numBands = 1;
+                    numBands = 1;
 
-		if (sampleSize == 4) {
-		    // Pixel data will not be unpacked, will use MPPSM to store
-		    // packed data and IndexColorModel to do the unpacking.
-		    sampleModel =
-			new MultiPixelPackedSampleModel(DataBuffer.TYPE_BYTE,
-							tileWidth,
-							tileHeight,
-							sampleSize);
-		} else if (sampleSize == 8) {
-		    sampleModel =
-			RasterFactory.createPixelInterleavedSampleModel(
-							    DataBuffer.TYPE_BYTE,
-							    tileWidth,
-							    tileHeight,
-							    numBands);
-		} else if (sampleSize == 16) {
+                    if (sampleSize == 4) {
+                        // Pixel data will not be unpacked, will use MPPSM to store
+                        // packed data and IndexColorModel to do the unpacking.
+                        sampleModel =
+                                new MultiPixelPackedSampleModel(DataBuffer.TYPE_BYTE,
+                                        tileWidth,
+                                        tileHeight,
+                                        sampleSize);
+                    } else if (sampleSize == 8) {
+                        sampleModel =
+                                RasterFactory.createPixelInterleavedSampleModel(
+                                        DataBuffer.TYPE_BYTE,
+                                        tileWidth,
+                                        tileHeight,
+                                        numBands);
+                    } else if (sampleSize == 16) {
 
-		    // Here datatype has to be unsigned since we are storing
-		    // indices into the IndexColorModel palette. Ofcourse
-		    // the actual palette entries are allowed to be negative.
-                    dataType = DataBuffer.TYPE_USHORT;
-		    sampleModel =
-			RasterFactory.createPixelInterleavedSampleModel(
-							DataBuffer.TYPE_USHORT,
-							tileWidth,
-							tileHeight,
-							numBands);
-		}
+                        // Here datatype has to be unsigned since we are storing
+                        // indices into the IndexColorModel palette. Ofcourse
+                        // the actual palette entries are allowed to be negative.
+                        dataType = DataBuffer.TYPE_USHORT;
+                        sampleModel =
+                                RasterFactory.createPixelInterleavedSampleModel(
+                                        DataBuffer.TYPE_USHORT,
+                                        tileWidth,
+                                        tileHeight,
+                                        numBands);
+                    }
 
-		int bandLength = colormap.length/3;
-		byte r[] = new byte[bandLength];
-		byte g[] = new byte[bandLength];
-		byte b[] = new byte[bandLength];
+                    int bandLength = colormap.length/3;
+                    byte r[] = new byte[bandLength];
+                    byte g[] = new byte[bandLength];
+                    byte b[] = new byte[bandLength];
 
-		int gIndex = bandLength;
-		int bIndex = bandLength * 2;
+                    int gIndex = bandLength;
+                    int bIndex = bandLength * 2;
 
-		if (dataType == DataBuffer.TYPE_SHORT) {
+                    if (dataType == DataBuffer.TYPE_SHORT) {
 
-		    for (int i=0; i<bandLength; i++) {
-			r[i] = param.decodeSigned16BitsTo8Bits(
-					 	     (short)colormap[i]);
-			g[i] = param.decodeSigned16BitsTo8Bits(
-						     (short)colormap[gIndex+i]);
-			b[i] = param.decodeSigned16BitsTo8Bits(
-						     (short)colormap[bIndex+i]);
-		    }
+                        for (int i=0; i<bandLength; i++) {
+                            r[i] = param.decodeSigned16BitsTo8Bits(
+                                    (short)colormap[i]);
+                            g[i] = param.decodeSigned16BitsTo8Bits(
+                                    (short)colormap[gIndex+i]);
+                            b[i] = param.decodeSigned16BitsTo8Bits(
+                                    (short)colormap[bIndex+i]);
+                        }
 
-		} else {
+                    } else {
 
-		    for (int i=0; i<bandLength; i++) {
-			r[i] = param.decode16BitsTo8Bits(colormap[i] & 0xffff);
-			g[i] = param.decode16BitsTo8Bits(colormap[gIndex+i] &
-							 0xffff);
-			b[i] = param.decode16BitsTo8Bits(colormap[bIndex+i] &
-							 0xffff);
-		    }
+                        for (int i=0; i<bandLength; i++) {
+                            r[i] = param.decode16BitsTo8Bits(colormap[i] & 0xffff);
+                            g[i] = param.decode16BitsTo8Bits(colormap[gIndex+i] &
+                                    0xffff);
+                            b[i] = param.decode16BitsTo8Bits(colormap[bIndex+i] &
+                                    0xffff);
+                        }
 
-		}
+                    }
 
-		colorModel = new IndexColorModel(sampleSize,
-						 bandLength, r, g, b);
-	    }
-            break;
+                    colorModel = new IndexColorModel(sampleSize,
+                            bandLength, r, g, b);
+                }
+                break;
 
-        default:
-            throw new RuntimeException("TIFFImage4");
+            default:
+                throw new RuntimeException("TIFFImage4");
         }
     }
 
@@ -953,7 +932,7 @@ public class TIFFImage extends SimpleRenderedImage {
     public synchronized Raster getTile(int tileX, int tileY) {
         // Check parameters.
         if ((tileX < 0) || (tileX >= tilesX) ||
-            (tileY < 0) || (tileY >= tilesY)) {
+                (tileY < 0) || (tileY >= tilesY)) {
             throw new IllegalArgumentException(JaiI18N.getString("TIFFImage12"));
         }
 
@@ -965,847 +944,847 @@ public class TIFFImage extends SimpleRenderedImage {
         // TIFFImageDecoder. This fixes 4690773.
         synchronized(this.stream) {
 
-	// Get the data array out of the DataBuffer
-	byte bdata[] = null;
-	short sdata[] = null;
-	int idata[] = null;
-	float fdata[] = null;
-	DataBuffer buffer = sampleModel.createDataBuffer();
+            // Get the data array out of the DataBuffer
+            byte bdata[] = null;
+            short sdata[] = null;
+            int idata[] = null;
+            float fdata[] = null;
+            DataBuffer buffer = sampleModel.createDataBuffer();
 
-	int dataType = sampleModel.getDataType();
-	if (dataType == DataBuffer.TYPE_BYTE) {
-	    bdata = ((DataBufferByte)buffer).getData();
-	} else if (dataType == DataBuffer.TYPE_USHORT) {
-	    sdata = ((DataBufferUShort)buffer).getData();
-	} else if (dataType == DataBuffer.TYPE_SHORT) {
-	    sdata = ((DataBufferShort)buffer).getData();
-	} else if (dataType == DataBuffer.TYPE_INT) {
-	    idata = ((DataBufferInt)buffer).getData();
-	} else if (dataType == DataBuffer.TYPE_FLOAT) {
-            if(buffer instanceof DataBufferFloat) {
-                fdata = ((DataBufferFloat)buffer).getData();
-            } else {
-                // This is a hack to make this work with JAI which in some
-                // cases downcasts the DataBuffer to a type-specific class.
-                // In the case of float data this current means the JAI class
-                // DataBufferFloat.
-                try {
-                    Method getDataMethod =
-                        buffer.getClass().getMethod("getData", (Class<?>[]) null);
-                    fdata = (float[])getDataMethod.invoke(buffer, (Object[]) null);
-                } catch(Exception e) {
-                    String message = JaiI18N.getString("TIFFImage18");
-                    ImagingListenerProxy.errorOccurred(message,
-                                           new ImagingException(message, e),
-                                           this, false);
+            int dataType = sampleModel.getDataType();
+            if (dataType == DataBuffer.TYPE_BYTE) {
+                bdata = ((DataBufferByte)buffer).getData();
+            } else if (dataType == DataBuffer.TYPE_USHORT) {
+                sdata = ((DataBufferUShort)buffer).getData();
+            } else if (dataType == DataBuffer.TYPE_SHORT) {
+                sdata = ((DataBufferShort)buffer).getData();
+            } else if (dataType == DataBuffer.TYPE_INT) {
+                idata = ((DataBufferInt)buffer).getData();
+            } else if (dataType == DataBuffer.TYPE_FLOAT) {
+                if(buffer instanceof DataBufferFloat) {
+                    fdata = ((DataBufferFloat)buffer).getData();
+                } else {
+                    // This is a hack to make this work with JAI which in some
+                    // cases downcasts the DataBuffer to a type-specific class.
+                    // In the case of float data this current means the JAI class
+                    // DataBufferFloat.
+                    try {
+                        Method getDataMethod =
+                                buffer.getClass().getMethod("getData", (Class<?>[]) null);
+                        fdata = (float[])getDataMethod.invoke(buffer, (Object[]) null);
+                    } catch(Exception e) {
+                        String message = JaiI18N.getString("TIFFImage18");
+                        ImagingListenerProxy.errorOccurred(message,
+                                new ImagingException(message, e),
+                                this, false);
 //                    throw new RuntimeException(JaiI18N.getString("TIFFImage18"));
+                    }
                 }
             }
-	}
 
-        tile =
-	    (WritableRaster)RasterFactory.createWritableRaster(sampleModel,
-                                                   buffer,
-                                                   new Point(tileXToX(tileX),
-                                                             tileYToY(tileY)));
+            tile =
+                    (WritableRaster)RasterFactory.createWritableRaster(sampleModel,
+                            buffer,
+                            new Point(tileXToX(tileX),
+                                    tileYToY(tileY)));
 
-	// Save original file pointer position and seek to tile data location.
-	long save_offset = 0;
-	try {
-	    save_offset = stream.getFilePointer();
-	    stream.seek(tileOffsets[tileY*tilesX + tileX]);
-	} catch (IOException ioe) {
-            String message = JaiI18N.getString("TIFFImage13");
-            ImagingListenerProxy.errorOccurred(message,
-                                   new ImagingException(message, ioe),
-                                   this, false);
-//	    throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
-	}
-
-	// Number of bytes in this tile (strip) after compression.
-	int byteCount = (int)tileByteCounts[tileY*tilesX + tileX];
-
-	// Find out the number of bytes in the current tile. If the image is
-        // tiled this may include pixels which are outside of the image bounds
-        // if the image width and height are not multiples of the tile width
-        // and height respectively.
-	Rectangle tileRect = new Rectangle(tileXToX(tileX), tileYToY(tileY),
-					   tileWidth, tileHeight);
-	Rectangle newRect = isTiled ?
-            tileRect : tileRect.intersection(getBounds());
-        int unitsInThisTile = newRect.width * newRect.height * numBands;
-
-        // Allocate read buffer if needed.
-	byte data[] = compression != COMP_NONE || imageType == TYPE_PALETTE ?
-            new byte[byteCount] : null;
-
-        // Read the data, uncompressing as needed. There are four cases:
-        // bilevel, palette-RGB, 4-bit grayscale, and everything else.
-        if(imageType == TYPE_BILEVEL) { // bilevel
-	    try {
-		if (compression == COMP_PACKBITS) {
-		    stream.readFully(data, 0, byteCount);
-
-		    // Since the decompressed data will still be packed
-		    // 8 pixels into 1 byte, calculate bytesInThisTile
-		    int bytesInThisTile;
-		    if ((newRect.width % 8) == 0) {
-			bytesInThisTile = (newRect.width/8) * newRect.height;
-		    } else {
-			bytesInThisTile =
-                            (newRect.width/8 + 1) * newRect.height;
-		    }
-		    decodePackbits(data, bytesInThisTile, bdata);
-		} else if (compression == COMP_LZW) {
-		    stream.readFully(data, 0, byteCount);
-		    lzwDecoder.decode(data, bdata, newRect.height);
-		} else if (compression == COMP_FAX_G3_1D) {
-		    stream.readFully(data, 0, byteCount);
-		    decoder.decode1D(bdata, data, 0, newRect.height);
-		} else if (compression == COMP_FAX_G3_2D) {
-		    stream.readFully(data, 0, byteCount);
-		    decoder.decode2D(bdata, data, 0, newRect.height,
-                                     tiffT4Options);
-		} else if (compression == COMP_FAX_G4_2D) {
-		    stream.readFully(data, 0, byteCount);
-                    decoder.decodeT6(bdata, data, 0, newRect.height,
-                                     tiffT6Options);
-		} else if (compression == COMP_DEFLATE) {
-                    stream.readFully(data, 0, byteCount);
-                    inflate(data, bdata);
-		} else if (compression == COMP_NONE) {
-		    stream.readFully(bdata, 0, byteCount);
-		}
-
-		stream.seek(save_offset);
-	    } catch (IOException ioe) {
+            // Save original file pointer position and seek to tile data location.
+            long save_offset = 0;
+            try {
+                save_offset = stream.getFilePointer();
+                stream.seek(tileOffsets[tileY*tilesX + tileX]);
+            } catch (IOException ioe) {
                 String message = JaiI18N.getString("TIFFImage13");
                 ImagingListenerProxy.errorOccurred(message,
-                                       new ImagingException(message, ioe),
-                                       this, false);
+                        new ImagingException(message, ioe),
+                        this, false);
+//	    throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
+            }
+
+            // Number of bytes in this tile (strip) after compression.
+            int byteCount = (int)tileByteCounts[tileY*tilesX + tileX];
+
+            // Find out the number of bytes in the current tile. If the image is
+            // tiled this may include pixels which are outside of the image bounds
+            // if the image width and height are not multiples of the tile width
+            // and height respectively.
+            Rectangle tileRect = new Rectangle(tileXToX(tileX), tileYToY(tileY),
+                    tileWidth, tileHeight);
+            Rectangle newRect = isTiled ?
+                    tileRect : tileRect.intersection(getBounds());
+            int unitsInThisTile = newRect.width * newRect.height * numBands;
+
+            // Allocate read buffer if needed.
+            byte data[] = compression != COMP_NONE || imageType == TYPE_PALETTE ?
+                    new byte[byteCount] : null;
+
+            // Read the data, uncompressing as needed. There are four cases:
+            // bilevel, palette-RGB, 4-bit grayscale, and everything else.
+            if(imageType == TYPE_BILEVEL) { // bilevel
+                try {
+                    if (compression == COMP_PACKBITS) {
+                        stream.readFully(data, 0, byteCount);
+
+                        // Since the decompressed data will still be packed
+                        // 8 pixels into 1 byte, calculate bytesInThisTile
+                        int bytesInThisTile;
+                        if ((newRect.width % 8) == 0) {
+                            bytesInThisTile = (newRect.width/8) * newRect.height;
+                        } else {
+                            bytesInThisTile =
+                                    (newRect.width/8 + 1) * newRect.height;
+                        }
+                        decodePackbits(data, bytesInThisTile, bdata);
+                    } else if (compression == COMP_LZW) {
+                        stream.readFully(data, 0, byteCount);
+                        lzwDecoder.decode(data, bdata, newRect.height);
+                    } else if (compression == COMP_FAX_G3_1D) {
+                        stream.readFully(data, 0, byteCount);
+                        decoder.decode1D(bdata, data, 0, newRect.height);
+                    } else if (compression == COMP_FAX_G3_2D) {
+                        stream.readFully(data, 0, byteCount);
+                        decoder.decode2D(bdata, data, 0, newRect.height,
+                                tiffT4Options);
+                    } else if (compression == COMP_FAX_G4_2D) {
+                        stream.readFully(data, 0, byteCount);
+                        decoder.decodeT6(bdata, data, 0, newRect.height,
+                                tiffT6Options);
+                    } else if (compression == COMP_DEFLATE) {
+                        stream.readFully(data, 0, byteCount);
+                        inflate(data, bdata);
+                    } else if (compression == COMP_NONE) {
+                        stream.readFully(bdata, 0, byteCount);
+                    }
+
+                    stream.seek(save_offset);
+                } catch (IOException ioe) {
+                    String message = JaiI18N.getString("TIFFImage13");
+                    ImagingListenerProxy.errorOccurred(message,
+                            new ImagingException(message, ioe),
+                            this, false);
 //		throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
-	    }
-        } else if(imageType == TYPE_PALETTE) { // palette-RGB
-	    if (sampleSize == 16) {
+                }
+            } else if(imageType == TYPE_PALETTE) { // palette-RGB
+                if (sampleSize == 16) {
 
-		if (decodePaletteAsShorts) {
+                    if (decodePaletteAsShorts) {
 
-		    short tempData[]= null;
+                        short tempData[]= null;
 
-		    // At this point the data is 1 banded and will
-		    // become 3 banded only after we've done the palette
-		    // lookup, since unitsInThisTile was calculated with
-		    // 3 bands, we need to divide this by 3.
-		    int unitsBeforeLookup = unitsInThisTile / 3;
+                        // At this point the data is 1 banded and will
+                        // become 3 banded only after we've done the palette
+                        // lookup, since unitsInThisTile was calculated with
+                        // 3 bands, we need to divide this by 3.
+                        int unitsBeforeLookup = unitsInThisTile / 3;
 
-		    // Since unitsBeforeLookup is the number of shorts,
-		    // but we do our decompression in terms of bytes, we
-		    // need to multiply it by 2 in order to figure out
-		    // how many bytes we'll get after decompression.
-		    int entries = unitsBeforeLookup * 2;
+                        // Since unitsBeforeLookup is the number of shorts,
+                        // but we do our decompression in terms of bytes, we
+                        // need to multiply it by 2 in order to figure out
+                        // how many bytes we'll get after decompression.
+                        int entries = unitsBeforeLookup * 2;
 
-		    // Read the data, if compressed, decode it, reset the pointer
-		    try {
+                        // Read the data, if compressed, decode it, reset the pointer
+                        try {
 
-			if (compression == COMP_PACKBITS) {
+                            if (compression == COMP_PACKBITS) {
 
-			    stream.readFully(data, 0, byteCount);
+                                stream.readFully(data, 0, byteCount);
 
-			    byte byteArray[] = new byte[entries];
-			    decodePackbits(data, entries, byteArray);
-			    tempData = new short[unitsBeforeLookup];
-			    interpretBytesAsShorts(byteArray, tempData,
-						   unitsBeforeLookup);
+                                byte byteArray[] = new byte[entries];
+                                decodePackbits(data, entries, byteArray);
+                                tempData = new short[unitsBeforeLookup];
+                                interpretBytesAsShorts(byteArray, tempData,
+                                        unitsBeforeLookup);
 
-			}  else if (compression == COMP_LZW) {
+                            }  else if (compression == COMP_LZW) {
 
-			    // Read in all the compressed data for this tile
-			    stream.readFully(data, 0, byteCount);
+                                // Read in all the compressed data for this tile
+                                stream.readFully(data, 0, byteCount);
 
-			    byte byteArray[] = new byte[entries];
-			    lzwDecoder.decode(data, byteArray, newRect.height);
-			    tempData = new short[unitsBeforeLookup];
-			    interpretBytesAsShorts(byteArray, tempData,
-						   unitsBeforeLookup);
+                                byte byteArray[] = new byte[entries];
+                                lzwDecoder.decode(data, byteArray, newRect.height);
+                                tempData = new short[unitsBeforeLookup];
+                                interpretBytesAsShorts(byteArray, tempData,
+                                        unitsBeforeLookup);
 
-			}  else if (compression == COMP_DEFLATE) {
+                            }  else if (compression == COMP_DEFLATE) {
 
-			    stream.readFully(data, 0, byteCount);
-			    byte byteArray[] = new byte[entries];
-			    inflate(data, byteArray);
-			    tempData = new short[unitsBeforeLookup];
-			    interpretBytesAsShorts(byteArray, tempData,
-						   unitsBeforeLookup);
+                                stream.readFully(data, 0, byteCount);
+                                byte byteArray[] = new byte[entries];
+                                inflate(data, byteArray);
+                                tempData = new short[unitsBeforeLookup];
+                                interpretBytesAsShorts(byteArray, tempData,
+                                        unitsBeforeLookup);
 
-			} else if (compression == COMP_NONE) {
+                            } else if (compression == COMP_NONE) {
 
-			    // byteCount tells us how many bytes are there
-			    // in this tile, but we need to read in shorts,
-			    // which will take half the space, so while
-			    // allocating we divide byteCount by 2.
-			    tempData = new short[byteCount/2];
-			    readShorts(byteCount/2, tempData);
-			}
-
-			stream.seek(save_offset);
-
-		    } catch (IOException ioe) {
-                        String message = JaiI18N.getString("TIFFImage13");
-                        ImagingListenerProxy.errorOccurred(message,
-                                               new ImagingException(message, ioe),
-                                               this, false);
-//			throw new RuntimeException(
-//					JaiI18N.getString("TIFFImage13"));
-		    }
-
-		    if (dataType == DataBuffer.TYPE_USHORT) {
-
-			// Expand the palette image into an rgb image with ushort
-			// data type.
-			int cmapValue;
-			int count = 0, lookup, len = colormap.length/3;
-			int len2 = len * 2;
-			for (int i=0; i<unitsBeforeLookup; i++) {
-			    // Get the index into the colormap
-			    lookup = tempData[i] & 0xffff;
-			    // Get the blue value
-			    cmapValue = colormap[lookup+len2];
-			    sdata[count++] = (short)(cmapValue & 0xffff);
-			    // Get the green value
-			    cmapValue = colormap[lookup+len];
-			    sdata[count++] = (short)(cmapValue & 0xffff);
-			    // Get the red value
-			    cmapValue = colormap[lookup];
-			    sdata[count++] = (short)(cmapValue & 0xffff);
-			}
-
-		    } else if (dataType == DataBuffer.TYPE_SHORT) {
-
-			// Expand the palette image into an rgb image with
-			// short data type.
-			int cmapValue;
-			int count = 0, lookup, len = colormap.length/3;
-			int len2 = len * 2;
-			for (int i=0; i<unitsBeforeLookup; i++) {
-			    // Get the index into the colormap
-			    lookup = tempData[i] & 0xffff;
-			    // Get the blue value
-			    cmapValue = colormap[lookup+len2];
-			    sdata[count++] = (short)cmapValue;
-			    // Get the green value
-			    cmapValue = colormap[lookup+len];
-			    sdata[count++] = (short)cmapValue;
-			    // Get the red value
-			    cmapValue = colormap[lookup];
-			    sdata[count++] = (short)cmapValue;
-			}
-		    }
-
-		} else {
-
-		    // No lookup being done here, when RGB values are needed,
-		    // the associated IndexColorModel can be used to get them.
-
-		    try {
-
-			if (compression == COMP_PACKBITS) {
-
-			    stream.readFully(data, 0, byteCount);
-
-			    // Since unitsInThisTile is the number of shorts,
-			    // but we do our decompression in terms of bytes, we
-			    // need to multiply unitsInThisTile by 2 in order to
-			    // figure out how many bytes we'll get after
-			    // decompression.
-			    int bytesInThisTile = unitsInThisTile * 2;
-
-			    byte byteArray[] = new byte[bytesInThisTile];
-			    decodePackbits(data, bytesInThisTile, byteArray);
-			    interpretBytesAsShorts(byteArray, sdata,
-						   unitsInThisTile);
-
-			} else if (compression == COMP_LZW) {
-
-			    stream.readFully(data, 0, byteCount);
-
-			    // Since unitsInThisTile is the number of shorts,
-			    // but we do our decompression in terms of bytes, we
-			    // need to multiply unitsInThisTile by 2 in order to
-			    // figure out how many bytes we'll get after
-			    // decompression.
-			    byte byteArray[] = new byte[unitsInThisTile * 2];
-			    lzwDecoder.decode(data, byteArray, newRect.height);
-			    interpretBytesAsShorts(byteArray, sdata,
-						   unitsInThisTile);
-
-			}  else if (compression == COMP_DEFLATE) {
-
-			    stream.readFully(data, 0, byteCount);
-			    byte byteArray[] = new byte[unitsInThisTile * 2];
-			    inflate(data, byteArray);
-			    interpretBytesAsShorts(byteArray, sdata,
-						   unitsInThisTile);
-
-			} else if (compression == COMP_NONE) {
-
-			    readShorts(byteCount/2, sdata);
-			}
-
-			stream.seek(save_offset);
-
-		    } catch (IOException ioe) {
-                        String message = JaiI18N.getString("TIFFImage13");
-                        ImagingListenerProxy.errorOccurred(message,
-                                               new ImagingException(message, ioe),
-                                               this, false);
-//			throw new RuntimeException(
-//					JaiI18N.getString("TIFFImage13"));
-		    }
-		}
-
-	    } else if (sampleSize == 8) {
-
-		if (decodePaletteAsShorts) {
-
-		    byte tempData[]= null;
-
-		    // At this point the data is 1 banded and will
-		    // become 3 banded only after we've done the palette
-		    // lookup, since unitsInThisTile was calculated with
-		    // 3 bands, we need to divide this by 3.
-		    int unitsBeforeLookup = unitsInThisTile / 3;
-
-		    // Read the data, if compressed, decode it, reset the pointer
-		    try {
-
-			if (compression == COMP_PACKBITS) {
-
-			    stream.readFully(data, 0, byteCount);
-			    tempData = new byte[unitsBeforeLookup];
-			    decodePackbits(data, unitsBeforeLookup, tempData);
-
-			}  else if (compression == COMP_LZW) {
-
-			    stream.readFully(data, 0, byteCount);
-			    tempData = new byte[unitsBeforeLookup];
-			    lzwDecoder.decode(data, tempData, newRect.height);
-
-                        } else if (compression == COMP_JPEG_TTN2) {
-
-                            stream.readFully(data, 0, byteCount);
-                            Raster tempTile = decodeJPEG(data,
-                                                         decodeParam,
-                                                         colorConvertJPEG,
-                                                         tile.getMinX(),
-                                                         tile.getMinY());
-                            int[] tempPixels = new int[unitsBeforeLookup];
-                            tempTile.getPixels(tile.getMinX(),
-                                               tile.getMinY(),
-                                               tile.getWidth(),
-                                               tile.getHeight(),
-                                               tempPixels);
-			    tempData = new byte[unitsBeforeLookup];
-                            for(int i = 0; i < unitsBeforeLookup; i++) {
-                                tempData[i] = (byte)tempPixels[i];
+                                // byteCount tells us how many bytes are there
+                                // in this tile, but we need to read in shorts,
+                                // which will take half the space, so while
+                                // allocating we divide byteCount by 2.
+                                tempData = new short[byteCount/2];
+                                readShorts(byteCount/2, tempData);
                             }
 
-			}  else if (compression == COMP_DEFLATE) {
+                            stream.seek(save_offset);
 
-			    stream.readFully(data, 0, byteCount);
-			    tempData = new byte[unitsBeforeLookup];
-			    inflate(data, tempData);
+                        } catch (IOException ioe) {
+                            String message = JaiI18N.getString("TIFFImage13");
+                            ImagingListenerProxy.errorOccurred(message,
+                                    new ImagingException(message, ioe),
+                                    this, false);
+//			throw new RuntimeException(
+//					JaiI18N.getString("TIFFImage13"));
+                        }
 
-			} else if (compression == COMP_NONE) {
+                        if (dataType == DataBuffer.TYPE_USHORT) {
 
-			    tempData = new byte[byteCount];
-			    stream.readFully(tempData, 0, byteCount);
-			}
+                            // Expand the palette image into an rgb image with ushort
+                            // data type.
+                            int cmapValue;
+                            int count = 0, lookup, len = colormap.length/3;
+                            int len2 = len * 2;
+                            for (int i=0; i<unitsBeforeLookup; i++) {
+                                // Get the index into the colormap
+                                lookup = tempData[i] & 0xffff;
+                                // Get the blue value
+                                cmapValue = colormap[lookup+len2];
+                                sdata[count++] = (short)(cmapValue & 0xffff);
+                                // Get the green value
+                                cmapValue = colormap[lookup+len];
+                                sdata[count++] = (short)(cmapValue & 0xffff);
+                                // Get the red value
+                                cmapValue = colormap[lookup];
+                                sdata[count++] = (short)(cmapValue & 0xffff);
+                            }
 
-			stream.seek(save_offset);
+                        } else if (dataType == DataBuffer.TYPE_SHORT) {
 
-		    } catch (IOException ioe) {
-                        String message = JaiI18N.getString("TIFFImage13");
-                        ImagingListenerProxy.errorOccurred(message,
-                                               new ImagingException(message, ioe),
-                                               this, false);
+                            // Expand the palette image into an rgb image with
+                            // short data type.
+                            int cmapValue;
+                            int count = 0, lookup, len = colormap.length/3;
+                            int len2 = len * 2;
+                            for (int i=0; i<unitsBeforeLookup; i++) {
+                                // Get the index into the colormap
+                                lookup = tempData[i] & 0xffff;
+                                // Get the blue value
+                                cmapValue = colormap[lookup+len2];
+                                sdata[count++] = (short)cmapValue;
+                                // Get the green value
+                                cmapValue = colormap[lookup+len];
+                                sdata[count++] = (short)cmapValue;
+                                // Get the red value
+                                cmapValue = colormap[lookup];
+                                sdata[count++] = (short)cmapValue;
+                            }
+                        }
+
+                    } else {
+
+                        // No lookup being done here, when RGB values are needed,
+                        // the associated IndexColorModel can be used to get them.
+
+                        try {
+
+                            if (compression == COMP_PACKBITS) {
+
+                                stream.readFully(data, 0, byteCount);
+
+                                // Since unitsInThisTile is the number of shorts,
+                                // but we do our decompression in terms of bytes, we
+                                // need to multiply unitsInThisTile by 2 in order to
+                                // figure out how many bytes we'll get after
+                                // decompression.
+                                int bytesInThisTile = unitsInThisTile * 2;
+
+                                byte byteArray[] = new byte[bytesInThisTile];
+                                decodePackbits(data, bytesInThisTile, byteArray);
+                                interpretBytesAsShorts(byteArray, sdata,
+                                        unitsInThisTile);
+
+                            } else if (compression == COMP_LZW) {
+
+                                stream.readFully(data, 0, byteCount);
+
+                                // Since unitsInThisTile is the number of shorts,
+                                // but we do our decompression in terms of bytes, we
+                                // need to multiply unitsInThisTile by 2 in order to
+                                // figure out how many bytes we'll get after
+                                // decompression.
+                                byte byteArray[] = new byte[unitsInThisTile * 2];
+                                lzwDecoder.decode(data, byteArray, newRect.height);
+                                interpretBytesAsShorts(byteArray, sdata,
+                                        unitsInThisTile);
+
+                            }  else if (compression == COMP_DEFLATE) {
+
+                                stream.readFully(data, 0, byteCount);
+                                byte byteArray[] = new byte[unitsInThisTile * 2];
+                                inflate(data, byteArray);
+                                interpretBytesAsShorts(byteArray, sdata,
+                                        unitsInThisTile);
+
+                            } else if (compression == COMP_NONE) {
+
+                                readShorts(byteCount/2, sdata);
+                            }
+
+                            stream.seek(save_offset);
+
+                        } catch (IOException ioe) {
+                            String message = JaiI18N.getString("TIFFImage13");
+                            ImagingListenerProxy.errorOccurred(message,
+                                    new ImagingException(message, ioe),
+                                    this, false);
+//			throw new RuntimeException(
+//					JaiI18N.getString("TIFFImage13"));
+                        }
+                    }
+
+                } else if (sampleSize == 8) {
+
+                    if (decodePaletteAsShorts) {
+
+                        byte tempData[]= null;
+
+                        // At this point the data is 1 banded and will
+                        // become 3 banded only after we've done the palette
+                        // lookup, since unitsInThisTile was calculated with
+                        // 3 bands, we need to divide this by 3.
+                        int unitsBeforeLookup = unitsInThisTile / 3;
+
+                        // Read the data, if compressed, decode it, reset the pointer
+                        try {
+
+                            if (compression == COMP_PACKBITS) {
+
+                                stream.readFully(data, 0, byteCount);
+                                tempData = new byte[unitsBeforeLookup];
+                                decodePackbits(data, unitsBeforeLookup, tempData);
+
+                            }  else if (compression == COMP_LZW) {
+
+                                stream.readFully(data, 0, byteCount);
+                                tempData = new byte[unitsBeforeLookup];
+                                lzwDecoder.decode(data, tempData, newRect.height);
+
+                            } else if (compression == COMP_JPEG_TTN2) {
+
+                                stream.readFully(data, 0, byteCount);
+                                Raster tempTile = decodeJPEG(data,
+                                        decodeParam,
+                                        colorConvertJPEG,
+                                        tile.getMinX(),
+                                        tile.getMinY());
+                                int[] tempPixels = new int[unitsBeforeLookup];
+                                tempTile.getPixels(tile.getMinX(),
+                                        tile.getMinY(),
+                                        tile.getWidth(),
+                                        tile.getHeight(),
+                                        tempPixels);
+                                tempData = new byte[unitsBeforeLookup];
+                                for(int i = 0; i < unitsBeforeLookup; i++) {
+                                    tempData[i] = (byte)tempPixels[i];
+                                }
+
+                            }  else if (compression == COMP_DEFLATE) {
+
+                                stream.readFully(data, 0, byteCount);
+                                tempData = new byte[unitsBeforeLookup];
+                                inflate(data, tempData);
+
+                            } else if (compression == COMP_NONE) {
+
+                                tempData = new byte[byteCount];
+                                stream.readFully(tempData, 0, byteCount);
+                            }
+
+                            stream.seek(save_offset);
+
+                        } catch (IOException ioe) {
+                            String message = JaiI18N.getString("TIFFImage13");
+                            ImagingListenerProxy.errorOccurred(message,
+                                    new ImagingException(message, ioe),
+                                    this, false);
 //		throw new RuntimeException(
 //					JaiI18N.getString("TIFFImage13"));
-		    }
+                        }
 
-		    // Expand the palette image into an rgb image with ushort
-		    // data type.
-		    int cmapValue;
-		    int count = 0, lookup, len = colormap.length/3;
-		    int len2 = len * 2;
-		    for (int i=0; i<unitsBeforeLookup; i++) {
-			// Get the index into the colormap
-			lookup = tempData[i] & 0xff;
-			// Get the blue value
-			cmapValue = colormap[lookup+len2];
-			sdata[count++] = (short)(cmapValue & 0xffff);
-			// Get the green value
-			cmapValue = colormap[lookup+len];
-			sdata[count++] = (short)(cmapValue & 0xffff);
-			// Get the red value
-			cmapValue = colormap[lookup];
-			sdata[count++] = (short)(cmapValue & 0xffff);
-		    }
-		} else {
+                        // Expand the palette image into an rgb image with ushort
+                        // data type.
+                        int cmapValue;
+                        int count = 0, lookup, len = colormap.length/3;
+                        int len2 = len * 2;
+                        for (int i=0; i<unitsBeforeLookup; i++) {
+                            // Get the index into the colormap
+                            lookup = tempData[i] & 0xff;
+                            // Get the blue value
+                            cmapValue = colormap[lookup+len2];
+                            sdata[count++] = (short)(cmapValue & 0xffff);
+                            // Get the green value
+                            cmapValue = colormap[lookup+len];
+                            sdata[count++] = (short)(cmapValue & 0xffff);
+                            // Get the red value
+                            cmapValue = colormap[lookup];
+                            sdata[count++] = (short)(cmapValue & 0xffff);
+                        }
+                    } else {
 
-		    // No lookup being done here, when RGB values are needed,
-		    // the associated IndexColorModel can be used to get them.
+                        // No lookup being done here, when RGB values are needed,
+                        // the associated IndexColorModel can be used to get them.
 
-		    try {
+                        try {
 
-			if (compression == COMP_PACKBITS) {
+                            if (compression == COMP_PACKBITS) {
 
-			    stream.readFully(data, 0, byteCount);
-			    decodePackbits(data, unitsInThisTile, bdata);
+                                stream.readFully(data, 0, byteCount);
+                                decodePackbits(data, unitsInThisTile, bdata);
 
-			} else if (compression == COMP_LZW) {
+                            } else if (compression == COMP_LZW) {
 
-			    stream.readFully(data, 0, byteCount);
-			    lzwDecoder.decode(data, bdata, newRect.height);
+                                stream.readFully(data, 0, byteCount);
+                                lzwDecoder.decode(data, bdata, newRect.height);
+
+                            } else if (compression == COMP_JPEG_TTN2) {
+
+                                stream.readFully(data, 0, byteCount);
+                                tile.setRect(decodeJPEG(data,
+                                        decodeParam,
+                                        colorConvertJPEG,
+                                        tile.getMinX(),
+                                        tile.getMinY()));
+
+                            }  else if (compression == COMP_DEFLATE) {
+
+                                stream.readFully(data, 0, byteCount);
+                                inflate(data, bdata);
+
+                            } else if (compression == COMP_NONE) {
+
+                                stream.readFully(bdata, 0, byteCount);
+                            }
+
+                            stream.seek(save_offset);
+
+                        } catch (IOException ioe) {
+                            String message = JaiI18N.getString("TIFFImage13");
+                            ImagingListenerProxy.errorOccurred(message,
+                                    new ImagingException(message, ioe),
+                                    this, false);
+//		throw new RuntimeException(
+//					JaiI18N.getString("TIFFImage13"));
+                        }
+                    }
+
+                } else if (sampleSize == 4) {
+
+                    int padding = (newRect.width % 2 == 0) ? 0 : 1;
+                    int bytesPostDecoding = ((newRect.width/2 + padding) *
+                            newRect.height);
+
+                    // Output short images
+                    if (decodePaletteAsShorts) {
+
+                        byte tempData[] = null;
+
+                        try {
+                            stream.readFully(data, 0, byteCount);
+                            stream.seek(save_offset);
+                        } catch (IOException ioe) {
+                            String message = JaiI18N.getString("TIFFImage13");
+                            ImagingListenerProxy.errorOccurred(message,
+                                    new ImagingException(message, ioe),
+                                    this, false);
+//			throw new RuntimeException(
+//					JaiI18N.getString("TIFFImage13"));
+                        }
+
+                        // If compressed, decode the data.
+                        if (compression == COMP_PACKBITS) {
+
+                            tempData = new byte[bytesPostDecoding];
+                            decodePackbits(data, bytesPostDecoding, tempData);
+
+                        }  else if (compression == COMP_LZW) {
+
+                            tempData = new byte[bytesPostDecoding];
+                            lzwDecoder.decode(data, tempData, newRect.height);
+
+                        }  else if (compression == COMP_DEFLATE) {
+
+                            tempData = new byte[bytesPostDecoding];
+                            inflate(data, tempData);
+
+                        } else if (compression == COMP_NONE) {
+
+                            tempData = data;
+                        }
+
+                        int bytes = unitsInThisTile / 3;
+
+                        // Unpack the 2 pixels packed into each byte.
+                        data = new byte[bytes];
+
+                        int srcCount = 0, dstCount = 0;
+                        for (int j=0; j<newRect.height; j++) {
+                            for (int i=0; i<newRect.width/2; i++) {
+                                data[dstCount++] =
+                                        (byte)((tempData[srcCount] & 0xf0) >> 4);
+                                data[dstCount++] =
+                                        (byte)(tempData[srcCount++] & 0x0f);
+                            }
+
+                            if (padding == 1) {
+                                data[dstCount++] =
+                                        (byte)((tempData[srcCount++] & 0xf0) >> 4);
+                            }
+                        }
+
+                        int len = colormap.length/3;
+                        int len2 = len*2;
+                        int cmapValue, lookup;
+                        int count = 0;
+                        for (int i=0; i<bytes; i++) {
+                            lookup = data[i] & 0xff;
+                            cmapValue = colormap[lookup+len2];
+                            sdata[count++] = (short)(cmapValue & 0xffff);
+                            cmapValue = colormap[lookup+len];
+                            sdata[count++] = (short)(cmapValue & 0xffff);
+                            cmapValue = colormap[lookup];
+                            sdata[count++] = (short)(cmapValue & 0xffff);
+                        }
+                    } else {
+
+                        // Output byte values, use IndexColorModel for unpacking
+                        try {
+
+                            // If compressed, decode the data.
+                            if (compression == COMP_PACKBITS) {
+
+                                stream.readFully(data, 0, byteCount);
+                                decodePackbits(data, bytesPostDecoding, bdata);
+
+                            }  else if (compression == COMP_LZW) {
+
+                                stream.readFully(data, 0, byteCount);
+                                lzwDecoder.decode(data, bdata, newRect.height);
+
+                            }  else if (compression == COMP_DEFLATE) {
+
+                                stream.readFully(data, 0, byteCount);
+                                inflate(data, bdata);
+
+                            } else if (compression == COMP_NONE) {
+
+                                stream.readFully(bdata, 0, byteCount);
+                            }
+
+                            stream.seek(save_offset);
+
+                        } catch (IOException ioe) {
+                            String message = JaiI18N.getString("TIFFImage13");
+                            ImagingListenerProxy.errorOccurred(message,
+                                    new ImagingException(message, ioe),
+                                    this, false);
+//			throw new RuntimeException(
+//					JaiI18N.getString("TIFFImage13"));
+                        }
+                    }
+                }
+            } else if(imageType == TYPE_GRAY_4BIT) { // 4-bit gray
+                try {
+                    if (compression == COMP_PACKBITS) {
+
+                        stream.readFully(data, 0, byteCount);
+
+                        // Since the decompressed data will still be packed
+                        // 2 pixels into 1 byte, calculate bytesInThisTile
+                        int bytesInThisTile;
+                        if ((newRect.width % 8) == 0) {
+                            bytesInThisTile = (newRect.width/2) * newRect.height;
+                        } else {
+                            bytesInThisTile = (newRect.width/2 + 1) *
+                                    newRect.height;
+                        }
+
+                        decodePackbits(data, bytesInThisTile, bdata);
+
+                    } else if (compression == COMP_LZW) {
+
+                        stream.readFully(data, 0, byteCount);
+                        lzwDecoder.decode(data, bdata, newRect.height);
+
+                    }  else if (compression == COMP_DEFLATE) {
+
+                        stream.readFully(data, 0, byteCount);
+                        inflate(data, bdata);
+
+                    } else {
+
+                        stream.readFully(bdata, 0, byteCount);
+                    }
+
+                    stream.seek(save_offset);
+                } catch (IOException ioe) {
+                    String message = JaiI18N.getString("TIFFImage13");
+                    ImagingListenerProxy.errorOccurred(message,
+                            new ImagingException(message, ioe),
+                            this, false);
+//		throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
+                }
+            } else { // everything else
+                try {
+
+                    if (sampleSize == 8) {
+
+                        if (compression == COMP_NONE) {
+
+                            stream.readFully(bdata, 0, byteCount);
+
+                        } else if (compression == COMP_LZW) {
+
+                            stream.readFully(data, 0, byteCount);
+                            lzwDecoder.decode(data, bdata, newRect.height);
+
+                        } else if (compression == COMP_PACKBITS) {
+
+                            stream.readFully(data, 0, byteCount);
+                            decodePackbits(data, unitsInThisTile, bdata);
 
                         } else if (compression == COMP_JPEG_TTN2) {
 
                             stream.readFully(data, 0, byteCount);
                             tile.setRect(decodeJPEG(data,
-                                                    decodeParam,
-                                                    colorConvertJPEG,
-                                                    tile.getMinX(),
-                                                    tile.getMinY()));
-
-			}  else if (compression == COMP_DEFLATE) {
+                                    decodeParam,
+                                    colorConvertJPEG,
+                                    tile.getMinX(),
+                                    tile.getMinY()));
+                        } else if (compression == COMP_DEFLATE) {
 
                             stream.readFully(data, 0, byteCount);
                             inflate(data, bdata);
+                        }
 
-			} else if (compression == COMP_NONE) {
+                    } else if (sampleSize == 16) {
 
-			    stream.readFully(bdata, 0, byteCount);
-			}
+                        if (compression == COMP_NONE) {
 
-			stream.seek(save_offset);
+                            readShorts(byteCount/2, sdata);
 
-		    } catch (IOException ioe) {
-                        String message = JaiI18N.getString("TIFFImage13");
-                        ImagingListenerProxy.errorOccurred(message,
-                                               new ImagingException(message, ioe),
-                                               this, false);
-//		throw new RuntimeException(
-//					JaiI18N.getString("TIFFImage13"));
-		    }
-		}
+                        } else if (compression == COMP_LZW) {
 
-	    } else if (sampleSize == 4) {
+                            stream.readFully(data, 0, byteCount);
 
-		int padding = (newRect.width % 2 == 0) ? 0 : 1;
-		int bytesPostDecoding = ((newRect.width/2 + padding) *
-					 newRect.height);
+                            // Since unitsInThisTile is the number of shorts,
+                            // but we do our decompression in terms of bytes, we
+                            // need to multiply unitsInThisTile by 2 in order to
+                            // figure out how many bytes we'll get after
+                            // decompression.
+                            byte byteArray[] = new byte[unitsInThisTile * 2];
+                            lzwDecoder.decode(data, byteArray, newRect.height);
+                            interpretBytesAsShorts(byteArray, sdata,
+                                    unitsInThisTile);
 
-		// Output short images
-		if (decodePaletteAsShorts) {
+                        } else if (compression == COMP_PACKBITS) {
 
-		    byte tempData[] = null;
+                            stream.readFully(data, 0, byteCount);
 
-		    try {
-			stream.readFully(data, 0, byteCount);
-			stream.seek(save_offset);
-		    } catch (IOException ioe) {
-                        String message = JaiI18N.getString("TIFFImage13");
-                        ImagingListenerProxy.errorOccurred(message,
-                                               new ImagingException(message, ioe),
-                                               this, false);
-//			throw new RuntimeException(
-//					JaiI18N.getString("TIFFImage13"));
-		    }
+                            // Since unitsInThisTile is the number of shorts,
+                            // but we do our decompression in terms of bytes, we
+                            // need to multiply unitsInThisTile by 2 in order to
+                            // figure out how many bytes we'll get after
+                            // decompression.
+                            int bytesInThisTile = unitsInThisTile * 2;
 
-		    // If compressed, decode the data.
-		    if (compression == COMP_PACKBITS) {
+                            byte byteArray[] = new byte[bytesInThisTile];
+                            decodePackbits(data, bytesInThisTile, byteArray);
+                            interpretBytesAsShorts(byteArray, sdata,
+                                    unitsInThisTile);
+                        } else if (compression == COMP_DEFLATE) {
 
-			tempData = new byte[bytesPostDecoding];
-			decodePackbits(data, bytesPostDecoding, tempData);
+                            stream.readFully(data, 0, byteCount);
+                            byte byteArray[] = new byte[unitsInThisTile * 2];
+                            inflate(data, byteArray);
+                            interpretBytesAsShorts(byteArray, sdata,
+                                    unitsInThisTile);
 
-		    }  else if (compression == COMP_LZW) {
+                        }
+                    } else if (sampleSize == 32 &&
+                            dataType == DataBuffer.TYPE_INT) { // redundant
+                        if (compression == COMP_NONE) {
 
-			tempData = new byte[bytesPostDecoding];
-			lzwDecoder.decode(data, tempData, newRect.height);
+                            readInts(byteCount/4, idata);
 
-                    }  else if (compression == COMP_DEFLATE) {
+                        } else if (compression == COMP_LZW) {
 
-			tempData = new byte[bytesPostDecoding];
-			inflate(data, tempData);
+                            stream.readFully(data, 0, byteCount);
 
-		    } else if (compression == COMP_NONE) {
+                            // Since unitsInThisTile is the number of ints,
+                            // but we do our decompression in terms of bytes, we
+                            // need to multiply unitsInThisTile by 4 in order to
+                            // figure out how many bytes we'll get after
+                            // decompression.
+                            byte byteArray[] = new byte[unitsInThisTile * 4];
+                            lzwDecoder.decode(data, byteArray, newRect.height);
+                            interpretBytesAsInts(byteArray, idata,
+                                    unitsInThisTile);
 
-			tempData = data;
-		    }
+                        } else if (compression == COMP_PACKBITS) {
 
-		    int bytes = unitsInThisTile / 3;
+                            stream.readFully(data, 0, byteCount);
 
-		    // Unpack the 2 pixels packed into each byte.
-		    data = new byte[bytes];
+                            // Since unitsInThisTile is the number of ints,
+                            // but we do our decompression in terms of bytes, we
+                            // need to multiply unitsInThisTile by 4 in order to
+                            // figure out how many bytes we'll get after
+                            // decompression.
+                            int bytesInThisTile = unitsInThisTile * 4;
 
-		    int srcCount = 0, dstCount = 0;
-		    for (int j=0; j<newRect.height; j++) {
-			for (int i=0; i<newRect.width/2; i++) {
-			    data[dstCount++] =
-				(byte)((tempData[srcCount] & 0xf0) >> 4);
-			    data[dstCount++] =
-				(byte)(tempData[srcCount++] & 0x0f);
-			}
+                            byte byteArray[] = new byte[bytesInThisTile];
+                            decodePackbits(data, bytesInThisTile, byteArray);
+                            interpretBytesAsInts(byteArray, idata,
+                                    unitsInThisTile);
+                        } else if (compression == COMP_DEFLATE) {
 
-			if (padding == 1) {
-			    data[dstCount++] =
-				(byte)((tempData[srcCount++] & 0xf0) >> 4);
-			}
-		    }
+                            stream.readFully(data, 0, byteCount);
+                            byte byteArray[] = new byte[unitsInThisTile * 4];
+                            inflate(data, byteArray);
+                            interpretBytesAsInts(byteArray, idata,
+                                    unitsInThisTile);
 
-		    int len = colormap.length/3;
-		    int len2 = len*2;
-		    int cmapValue, lookup;
-		    int count = 0;
-		    for (int i=0; i<bytes; i++) {
-			lookup = data[i] & 0xff;
-			cmapValue = colormap[lookup+len2];
-			sdata[count++] = (short)(cmapValue & 0xffff);
-			cmapValue = colormap[lookup+len];
-			sdata[count++] = (short)(cmapValue & 0xffff);
-			cmapValue = colormap[lookup];
-			sdata[count++] = (short)(cmapValue & 0xffff);
-		    }
-		} else {
+                        }
+                    } else if (sampleSize == 32 &&
+                            dataType == DataBuffer.TYPE_FLOAT) { // redundant
+                        if (compression == COMP_NONE) {
 
-		    // Output byte values, use IndexColorModel for unpacking
-		    try {
+                            readFloats(byteCount/4, fdata);
 
-			// If compressed, decode the data.
-			if (compression == COMP_PACKBITS) {
+                        } else if (compression == COMP_LZW) {
 
-			    stream.readFully(data, 0, byteCount);
-			    decodePackbits(data, bytesPostDecoding, bdata);
+                            stream.readFully(data, 0, byteCount);
 
-			}  else if (compression == COMP_LZW) {
+                            // Since unitsInThisTile is the number of floats,
+                            // but we do our decompression in terms of bytes, we
+                            // need to multiply unitsInThisTile by 4 in order to
+                            // figure out how many bytes we'll get after
+                            // decompression.
+                            byte byteArray[] = new byte[unitsInThisTile * 4];
+                            lzwDecoder.decode(data, byteArray, newRect.height);
+                            interpretBytesAsFloats(byteArray, fdata,
+                                    unitsInThisTile);
 
-			    stream.readFully(data, 0, byteCount);
-			    lzwDecoder.decode(data, bdata, newRect.height);
+                        } else if (compression == COMP_PACKBITS) {
 
-                        }  else if (compression == COMP_DEFLATE) {
+                            stream.readFully(data, 0, byteCount);
 
-			    stream.readFully(data, 0, byteCount);
-			    inflate(data, bdata);
+                            // Since unitsInThisTile is the number of floats,
+                            // but we do our decompression in terms of bytes, we
+                            // need to multiply unitsInThisTile by 4 in order to
+                            // figure out how many bytes we'll get after
+                            // decompression.
+                            int bytesInThisTile = unitsInThisTile * 4;
 
-			} else if (compression == COMP_NONE) {
+                            byte byteArray[] = new byte[bytesInThisTile];
+                            decodePackbits(data, bytesInThisTile, byteArray);
+                            interpretBytesAsFloats(byteArray, fdata,
+                                    unitsInThisTile);
+                        } else if (compression == COMP_DEFLATE) {
 
-			    stream.readFully(bdata, 0, byteCount);
-			}
+                            stream.readFully(data, 0, byteCount);
+                            byte byteArray[] = new byte[unitsInThisTile * 4];
+                            inflate(data, byteArray);
+                            interpretBytesAsFloats(byteArray, fdata,
+                                    unitsInThisTile);
 
-			stream.seek(save_offset);
-
-		    } catch (IOException ioe) {
-                        String message = JaiI18N.getString("TIFFImage13");
-                        ImagingListenerProxy.errorOccurred(message,
-                                               new ImagingException(message, ioe),
-                                               this, false);
-//			throw new RuntimeException(
-//					JaiI18N.getString("TIFFImage13"));
-		    }
-		}
-	    }
-        } else if(imageType == TYPE_GRAY_4BIT) { // 4-bit gray
-            try {
-                if (compression == COMP_PACKBITS) {
-
-                    stream.readFully(data, 0, byteCount);
-
-                    // Since the decompressed data will still be packed
-                    // 2 pixels into 1 byte, calculate bytesInThisTile
-                    int bytesInThisTile;
-                    if ((newRect.width % 8) == 0) {
-                        bytesInThisTile = (newRect.width/2) * newRect.height;
-                    } else {
-                        bytesInThisTile = (newRect.width/2 + 1) *
-                            newRect.height;
+                        }
                     }
 
-                    decodePackbits(data, bytesInThisTile, bdata);
+                    stream.seek(save_offset);
 
-                } else if (compression == COMP_LZW) {
-
-                    stream.readFully(data, 0, byteCount);
-                    lzwDecoder.decode(data, bdata, newRect.height);
-
-                }  else if (compression == COMP_DEFLATE) {
-
-                    stream.readFully(data, 0, byteCount);
-                    inflate(data, bdata);
-
-                } else {
-
-                    stream.readFully(bdata, 0, byteCount);
-                }
-
-                stream.seek(save_offset);
-	    } catch (IOException ioe) {
-                String message = JaiI18N.getString("TIFFImage13");
-                ImagingListenerProxy.errorOccurred(message,
-                                       new ImagingException(message, ioe),
-                                       this, false);
+                } catch (IOException ioe) {
+                    String message = JaiI18N.getString("TIFFImage13");
+                    ImagingListenerProxy.errorOccurred(message,
+                            new ImagingException(message, ioe),
+                            this, false);
 //		throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
-	    }
-        } else { // everything else
-	    try {
-
-		if (sampleSize == 8) {
-
-		    if (compression == COMP_NONE) {
-
-			stream.readFully(bdata, 0, byteCount);
-
-		    } else if (compression == COMP_LZW) {
-
-			stream.readFully(data, 0, byteCount);
-			lzwDecoder.decode(data, bdata, newRect.height);
-
-		    } else if (compression == COMP_PACKBITS) {
-
-			stream.readFully(data, 0, byteCount);
-			decodePackbits(data, unitsInThisTile, bdata);
-
-		    } else if (compression == COMP_JPEG_TTN2) {
-
-			stream.readFully(data, 0, byteCount);
-                        tile.setRect(decodeJPEG(data,
-                                                decodeParam,
-                                                colorConvertJPEG,
-                                                tile.getMinX(),
-                                                tile.getMinY()));
-		    } else if (compression == COMP_DEFLATE) {
-
-			stream.readFully(data, 0, byteCount);
-                        inflate(data, bdata);
-                    }
-
-		} else if (sampleSize == 16) {
-
-		    if (compression == COMP_NONE) {
-
-			readShorts(byteCount/2, sdata);
-
-		    } else if (compression == COMP_LZW) {
-
-			stream.readFully(data, 0, byteCount);
-
-			// Since unitsInThisTile is the number of shorts,
-			// but we do our decompression in terms of bytes, we
-			// need to multiply unitsInThisTile by 2 in order to
-			// figure out how many bytes we'll get after
-			// decompression.
-			byte byteArray[] = new byte[unitsInThisTile * 2];
-			lzwDecoder.decode(data, byteArray, newRect.height);
-			interpretBytesAsShorts(byteArray, sdata,
-					       unitsInThisTile);
-
-		    } else if (compression == COMP_PACKBITS) {
-
-			stream.readFully(data, 0, byteCount);
-
-			// Since unitsInThisTile is the number of shorts,
-			// but we do our decompression in terms of bytes, we
-			// need to multiply unitsInThisTile by 2 in order to
-			// figure out how many bytes we'll get after
-			// decompression.
-			int bytesInThisTile = unitsInThisTile * 2;
-
-			byte byteArray[] = new byte[bytesInThisTile];
-			decodePackbits(data, bytesInThisTile, byteArray);
-			interpretBytesAsShorts(byteArray, sdata,
-					       unitsInThisTile);
-		    } else if (compression == COMP_DEFLATE) {
-
-			stream.readFully(data, 0, byteCount);
-			byte byteArray[] = new byte[unitsInThisTile * 2];
-			inflate(data, byteArray);
-			interpretBytesAsShorts(byteArray, sdata,
-					       unitsInThisTile);
-
-		    }
-		} else if (sampleSize == 32 &&
-                           dataType == DataBuffer.TYPE_INT) { // redundant
-		    if (compression == COMP_NONE) {
-
-			readInts(byteCount/4, idata);
-
-		    } else if (compression == COMP_LZW) {
-
-			stream.readFully(data, 0, byteCount);
-
-			// Since unitsInThisTile is the number of ints,
-			// but we do our decompression in terms of bytes, we
-			// need to multiply unitsInThisTile by 4 in order to
-			// figure out how many bytes we'll get after
-			// decompression.
-			byte byteArray[] = new byte[unitsInThisTile * 4];
-			lzwDecoder.decode(data, byteArray, newRect.height);
-			interpretBytesAsInts(byteArray, idata,
-                                             unitsInThisTile);
-
-		    } else if (compression == COMP_PACKBITS) {
-
-			stream.readFully(data, 0, byteCount);
-
-			// Since unitsInThisTile is the number of ints,
-			// but we do our decompression in terms of bytes, we
-			// need to multiply unitsInThisTile by 4 in order to
-			// figure out how many bytes we'll get after
-			// decompression.
-			int bytesInThisTile = unitsInThisTile * 4;
-
-			byte byteArray[] = new byte[bytesInThisTile];
-			decodePackbits(data, bytesInThisTile, byteArray);
-			interpretBytesAsInts(byteArray, idata,
-                                             unitsInThisTile);
-		    } else if (compression == COMP_DEFLATE) {
-
-			stream.readFully(data, 0, byteCount);
-			byte byteArray[] = new byte[unitsInThisTile * 4];
-			inflate(data, byteArray);
-			interpretBytesAsInts(byteArray, idata,
-                                             unitsInThisTile);
-
-                    }
-		} else if (sampleSize == 32 &&
-                           dataType == DataBuffer.TYPE_FLOAT) { // redundant
-		    if (compression == COMP_NONE) {
-
-			readFloats(byteCount/4, fdata);
-
-		    } else if (compression == COMP_LZW) {
-
-			stream.readFully(data, 0, byteCount);
-
-			// Since unitsInThisTile is the number of floats,
-			// but we do our decompression in terms of bytes, we
-			// need to multiply unitsInThisTile by 4 in order to
-			// figure out how many bytes we'll get after
-			// decompression.
-			byte byteArray[] = new byte[unitsInThisTile * 4];
-			lzwDecoder.decode(data, byteArray, newRect.height);
-			interpretBytesAsFloats(byteArray, fdata,
-                                               unitsInThisTile);
-
-		    } else if (compression == COMP_PACKBITS) {
-
-			stream.readFully(data, 0, byteCount);
-
-			// Since unitsInThisTile is the number of floats,
-			// but we do our decompression in terms of bytes, we
-			// need to multiply unitsInThisTile by 4 in order to
-			// figure out how many bytes we'll get after
-			// decompression.
-			int bytesInThisTile = unitsInThisTile * 4;
-
-			byte byteArray[] = new byte[bytesInThisTile];
-			decodePackbits(data, bytesInThisTile, byteArray);
-			interpretBytesAsFloats(byteArray, fdata,
-                                               unitsInThisTile);
-		    } else if (compression == COMP_DEFLATE) {
-
-			stream.readFully(data, 0, byteCount);
-			byte byteArray[] = new byte[unitsInThisTile * 4];
-                        inflate(data, byteArray);
-			interpretBytesAsFloats(byteArray, fdata,
-                                               unitsInThisTile);
-
-                    }
-		}
-
-		stream.seek(save_offset);
-
-	    } catch (IOException ioe) {
-                String message = JaiI18N.getString("TIFFImage13");
-                ImagingListenerProxy.errorOccurred(message,
-                                       new ImagingException(message, ioe),
-                                       this, false);
-//		throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
-	    }
-
-            // Modify the data for certain special cases.
-            switch(imageType) {
-            case TYPE_GRAY:
-            case TYPE_GRAY_ALPHA:
-                if(isWhiteZero) {
-                    // Since we are using a ComponentColorModel with this
-                    // image, we need to change the WhiteIsZero data to
-                    // BlackIsZero data so it will display properly.
-                    if (dataType == DataBuffer.TYPE_BYTE &&
-                        !(colorModel instanceof IndexColorModel)) {
-
-                        for (int l = 0; l < bdata.length; l += numBands) {
-                            bdata[l] = (byte)(255 - bdata[l]);
-                        }
-                    } else if (dataType == DataBuffer.TYPE_USHORT) {
-
-                        int ushortMax = Short.MAX_VALUE - Short.MIN_VALUE;
-                        for (int l = 0; l < sdata.length; l += numBands) {
-                            sdata[l] = (short)(ushortMax - sdata[l]);
-                        }
-
-                    } else if (dataType == DataBuffer.TYPE_SHORT) {
-
-                        for (int l = 0; l < sdata.length; l += numBands) {
-                            sdata[l] = (short)(~sdata[l]);
-                        }
-                    } else if (dataType == DataBuffer.TYPE_INT) {
-
-                        long uintMax = Integer.MAX_VALUE - Integer.MIN_VALUE;
-                        for (int l = 0; l < idata.length; l += numBands) {
-                            idata[l] = (int)(uintMax - (long)idata[l]);
-                        }
-                    }
-                }
-                break;
-            case TYPE_YCBCR_SUB:
-                // Post-processing for YCbCr with subsampled chrominance:
-                // simply replicate the chroma channels for displayability.
-                int pixelsPerDataUnit = chromaSubH*chromaSubV;
-
-                int numH = newRect.width/chromaSubH;
-                int numV = newRect.height/chromaSubV;
-
-                byte[] tempData = new byte[numH*numV*(pixelsPerDataUnit + 2)];
-                System.arraycopy(bdata, 0, tempData, 0, tempData.length);
-
-                int samplesPerDataUnit = pixelsPerDataUnit*3;
-                int[] pixels = new int[samplesPerDataUnit];
-
-                int bOffset = 0;
-                int offsetCb = pixelsPerDataUnit;
-                int offsetCr = offsetCb + 1;
-
-                int y = newRect.y;
-                for(int j = 0; j < numV; j++) {
-                    int x = newRect.x;
-                    for(int i = 0; i < numH; i++) {
-                        int Cb = tempData[bOffset + offsetCb];
-                        int Cr = tempData[bOffset + offsetCr];
-                        int k = 0;
-                        while(k < samplesPerDataUnit) {
-                            pixels[k++] = tempData[bOffset++];
-                            pixels[k++] = Cb;
-                            pixels[k++] = Cr;
-                        }
-                        bOffset += 2;
-                        tile.setPixels(x, y, chromaSubH, chromaSubV, pixels);
-                        x += chromaSubH;
-                    }
-                    y += chromaSubV;
                 }
 
-                break;
+                // Modify the data for certain special cases.
+                switch(imageType) {
+                    case TYPE_GRAY:
+                    case TYPE_GRAY_ALPHA:
+                        if(isWhiteZero) {
+                            // Since we are using a ComponentColorModel with this
+                            // image, we need to change the WhiteIsZero data to
+                            // BlackIsZero data so it will display properly.
+                            if (dataType == DataBuffer.TYPE_BYTE &&
+                                    !(colorModel instanceof IndexColorModel)) {
+
+                                for (int l = 0; l < bdata.length; l += numBands) {
+                                    bdata[l] = (byte)(255 - bdata[l]);
+                                }
+                            } else if (dataType == DataBuffer.TYPE_USHORT) {
+
+                                int ushortMax = Short.MAX_VALUE - Short.MIN_VALUE;
+                                for (int l = 0; l < sdata.length; l += numBands) {
+                                    sdata[l] = (short)(ushortMax - sdata[l]);
+                                }
+
+                            } else if (dataType == DataBuffer.TYPE_SHORT) {
+
+                                for (int l = 0; l < sdata.length; l += numBands) {
+                                    sdata[l] = (short)(~sdata[l]);
+                                }
+                            } else if (dataType == DataBuffer.TYPE_INT) {
+
+                                long uintMax = Integer.MAX_VALUE - Integer.MIN_VALUE;
+                                for (int l = 0; l < idata.length; l += numBands) {
+                                    idata[l] = (int)(uintMax - (long)idata[l]);
+                                }
+                            }
+                        }
+                        break;
+                    case TYPE_YCBCR_SUB:
+                        // Post-processing for YCbCr with subsampled chrominance:
+                        // simply replicate the chroma channels for displayability.
+                        int pixelsPerDataUnit = chromaSubH*chromaSubV;
+
+                        int numH = newRect.width/chromaSubH;
+                        int numV = newRect.height/chromaSubV;
+
+                        byte[] tempData = new byte[numH*numV*(pixelsPerDataUnit + 2)];
+                        System.arraycopy(bdata, 0, tempData, 0, tempData.length);
+
+                        int samplesPerDataUnit = pixelsPerDataUnit*3;
+                        int[] pixels = new int[samplesPerDataUnit];
+
+                        int bOffset = 0;
+                        int offsetCb = pixelsPerDataUnit;
+                        int offsetCr = offsetCb + 1;
+
+                        int y = newRect.y;
+                        for(int j = 0; j < numV; j++) {
+                            int x = newRect.x;
+                            for(int i = 0; i < numH; i++) {
+                                int Cb = tempData[bOffset + offsetCb];
+                                int Cr = tempData[bOffset + offsetCr];
+                                int k = 0;
+                                while(k < samplesPerDataUnit) {
+                                    pixels[k++] = tempData[bOffset++];
+                                    pixels[k++] = Cb;
+                                    pixels[k++] = Cr;
+                                }
+                                bOffset += 2;
+                                tile.setPixels(x, y, chromaSubH, chromaSubV, pixels);
+                                x += chromaSubH;
+                            }
+                            y += chromaSubV;
+                        }
+
+                        break;
+                }
             }
-        }
 
         } // synchronized(this.stream)
 
@@ -1814,89 +1793,89 @@ public class TIFFImage extends SimpleRenderedImage {
 
     private void readShorts(int shortCount, short shortArray[]) {
 
-	// Since each short consists of 2 bytes, we need a
-	// byte array of double size
-	int byteCount = 2 * shortCount;
-	byte byteArray[] = new byte[byteCount];
+        // Since each short consists of 2 bytes, we need a
+        // byte array of double size
+        int byteCount = 2 * shortCount;
+        byte byteArray[] = new byte[byteCount];
 
-	try {
-	    stream.readFully(byteArray, 0, byteCount);
-	} catch (IOException ioe) {
+        try {
+            stream.readFully(byteArray, 0, byteCount);
+        } catch (IOException ioe) {
             String message = JaiI18N.getString("TIFFImage13");
             ImagingListenerProxy.errorOccurred(message,
-                                   new ImagingException(message, ioe),
-                                   this, false);
+                    new ImagingException(message, ioe),
+                    this, false);
 //	   throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
-	}
+        }
 
-	interpretBytesAsShorts(byteArray, shortArray, shortCount);
+        interpretBytesAsShorts(byteArray, shortArray, shortCount);
     }
 
     private void readInts(int intCount, int intArray[]) {
 
-	// Since each int consists of 4 bytes, we need a
-	// byte array of quadruple size
-	int byteCount = 4 * intCount;
-	byte byteArray[] = new byte[byteCount];
+        // Since each int consists of 4 bytes, we need a
+        // byte array of quadruple size
+        int byteCount = 4 * intCount;
+        byte byteArray[] = new byte[byteCount];
 
-	try {
-	    stream.readFully(byteArray, 0, byteCount);
-	} catch (IOException ioe) {
+        try {
+            stream.readFully(byteArray, 0, byteCount);
+        } catch (IOException ioe) {
             String message = JaiI18N.getString("TIFFImage13");
             ImagingListenerProxy.errorOccurred(message,
-                                   new ImagingException(message, ioe),
-                                   this, false);
+                    new ImagingException(message, ioe),
+                    this, false);
 //	   throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
-	}
+        }
 
-	interpretBytesAsInts(byteArray, intArray, intCount);
+        interpretBytesAsInts(byteArray, intArray, intCount);
     }
 
     private void readFloats(int floatCount, float floatArray[]) {
 
-	// Since each float consists of 4 bytes, we need a
-	// byte array of quadruple size
-	int byteCount = 4 * floatCount;
-	byte byteArray[] = new byte[byteCount];
+        // Since each float consists of 4 bytes, we need a
+        // byte array of quadruple size
+        int byteCount = 4 * floatCount;
+        byte byteArray[] = new byte[byteCount];
 
-	try {
-	    stream.readFully(byteArray, 0, byteCount);
-	} catch (IOException ioe) {
+        try {
+            stream.readFully(byteArray, 0, byteCount);
+        } catch (IOException ioe) {
             String message = JaiI18N.getString("TIFFImage13");
             ImagingListenerProxy.errorOccurred(message,
-                                   new ImagingException(message, ioe),
-                                   this, false);
+                    new ImagingException(message, ioe),
+                    this, false);
 //	   throw new RuntimeException(JaiI18N.getString("TIFFImage13"));
-	}
+        }
 
-	interpretBytesAsFloats(byteArray, floatArray, floatCount);
+        interpretBytesAsFloats(byteArray, floatArray, floatCount);
     }
 
     // Method to interpret a byte array to a short array, depending on
     // whether the bytes are stored in a big endian or little endian format.
     private void interpretBytesAsShorts(byte byteArray[],
-					short shortArray[],
-					int shortCount) {
+                                        short shortArray[],
+                                        int shortCount) {
 
-	int j = 0;
-	int firstByte, secondByte;
+        int j = 0;
+        int firstByte, secondByte;
 
-	if (isBigEndian) {
+        if (isBigEndian) {
 
-	    for (int i=0; i<shortCount; i++) {
-		firstByte = byteArray[j++] & 0xff;
-		secondByte = byteArray[j++] & 0xff;
-		shortArray[i] = (short)((firstByte << 8) + secondByte);
-	    }
+            for (int i=0; i<shortCount; i++) {
+                firstByte = byteArray[j++] & 0xff;
+                secondByte = byteArray[j++] & 0xff;
+                shortArray[i] = (short)((firstByte << 8) + secondByte);
+            }
 
-	} else {
+        } else {
 
-	    for (int i=0; i<shortCount; i++) {
-		firstByte = byteArray[j++] & 0xff;
-		secondByte = byteArray[j++] & 0xff;
-		shortArray[i] = (short)((secondByte << 8) + firstByte);
-	    }
-	}
+            for (int i=0; i<shortCount; i++) {
+                firstByte = byteArray[j++] & 0xff;
+                secondByte = byteArray[j++] & 0xff;
+                shortArray[i] = (short)((secondByte << 8) + firstByte);
+            }
+        }
     }
 
     // Method to interpret a byte array to a int array, depending on
@@ -1905,28 +1884,28 @@ public class TIFFImage extends SimpleRenderedImage {
                                       int intArray[],
                                       int intCount) {
 
-	int j = 0;
+        int j = 0;
 
-	if (isBigEndian) {
+        if (isBigEndian) {
 
-	    for (int i=0; i<intCount; i++) {
-		intArray[i] =
-                    (int)(((byteArray[j++] & 0xff) << 24) |
-                          ((byteArray[j++] & 0xff) << 16) |
-                          ((byteArray[j++] & 0xff) << 8) |
-                          (byteArray[j++] & 0xff));
-	    }
+            for (int i=0; i<intCount; i++) {
+                intArray[i] =
+                        (int)(((byteArray[j++] & 0xff) << 24) |
+                                ((byteArray[j++] & 0xff) << 16) |
+                                ((byteArray[j++] & 0xff) << 8) |
+                                (byteArray[j++] & 0xff));
+            }
 
-	} else {
+        } else {
 
-	    for (int i=0; i<intCount; i++) {
-		intArray[i] =
-                    (int)((byteArray[j++] & 0xff) |
-                          ((byteArray[j++] & 0xff) << 8) |
-                          ((byteArray[j++] & 0xff) << 16) |
-                          ((byteArray[j++] & 0xff) << 24));
-	    }
-	}
+            for (int i=0; i<intCount; i++) {
+                intArray[i] =
+                        (int)((byteArray[j++] & 0xff) |
+                                ((byteArray[j++] & 0xff) << 8) |
+                                ((byteArray[j++] & 0xff) << 16) |
+                                ((byteArray[j++] & 0xff) << 24));
+            }
+        }
     }
 
     // Method to interpret a byte array to a float array, depending on
@@ -1935,121 +1914,121 @@ public class TIFFImage extends SimpleRenderedImage {
                                         float floatArray[],
                                         int floatCount) {
 
-	int j = 0;
+        int j = 0;
 
-	if (isBigEndian) {
+        if (isBigEndian) {
 
-	    for (int i=0; i<floatCount; i++) {
+            for (int i=0; i<floatCount; i++) {
                 int value = (int)(((byteArray[j++] & 0xff) << 24) |
-                                  ((byteArray[j++] & 0xff) << 16) |
-                                  ((byteArray[j++] & 0xff) << 8) |
-                                  (byteArray[j++] & 0xff));
-		floatArray[i] = Float.intBitsToFloat(value);
-	    }
+                        ((byteArray[j++] & 0xff) << 16) |
+                        ((byteArray[j++] & 0xff) << 8) |
+                        (byteArray[j++] & 0xff));
+                floatArray[i] = Float.intBitsToFloat(value);
+            }
 
-	} else {
+        } else {
 
-	    for (int i=0; i<floatCount; i++) {
-		int value = (int)((byteArray[j++] & 0xff) |
-                                  ((byteArray[j++] & 0xff) << 8) |
-                                  ((byteArray[j++] & 0xff) << 16) |
-                                  ((byteArray[j++] & 0xff) << 24));
-		floatArray[i] = Float.intBitsToFloat(value);
-	    }
-	}
+            for (int i=0; i<floatCount; i++) {
+                int value = (int)((byteArray[j++] & 0xff) |
+                        ((byteArray[j++] & 0xff) << 8) |
+                        ((byteArray[j++] & 0xff) << 16) |
+                        ((byteArray[j++] & 0xff) << 24));
+                floatArray[i] = Float.intBitsToFloat(value);
+            }
+        }
     }
 
     // Uncompress packbits compressed image data.
     private byte[] decodePackbits(byte data[], int arraySize, byte[] dst) {
 
-	if (dst == null) {
-	    dst = new byte[arraySize];
-	}
+        if (dst == null) {
+            dst = new byte[arraySize];
+        }
 
-	int srcCount = 0, dstCount = 0;
+        int srcCount = 0, dstCount = 0;
         int srcArraySize = data.length;
-	byte repeat, b;
+        byte repeat, b;
 
-	try {
+        try {
 
-	    while (dstCount < arraySize && srcCount < srcArraySize) {
+            while (dstCount < arraySize && srcCount < srcArraySize) {
 
-		b = data[srcCount++];
+                b = data[srcCount++];
 
-		if (b >= 0 && b <= 127) {
+                if (b >= 0 && b <= 127) {
 
-		    // literal run packet
-		    for (int i=0; i<(b + 1); i++) {
-			dst[dstCount++] = data[srcCount++];
-		    }
+                    // literal run packet
+                    for (int i=0; i<(b + 1); i++) {
+                        dst[dstCount++] = data[srcCount++];
+                    }
 
-		} else if (b <= -1 && b >= -127) {
+                } else if (b <= -1 && b >= -127) {
 
-		    // 2 byte encoded run packet
-		    repeat = data[srcCount++];
-		    for (int i=0; i<(-b + 1); i++) {
-			dst[dstCount++] = repeat;
-		    }
+                    // 2 byte encoded run packet
+                    repeat = data[srcCount++];
+                    for (int i=0; i<(-b + 1); i++) {
+                        dst[dstCount++] = repeat;
+                    }
 
-		} else {
-		    // no-op packet. Do nothing
-		    srcCount++;
-		}
-	    }
-	} catch (java.lang.ArrayIndexOutOfBoundsException ae) {
+                } else {
+                    // no-op packet. Do nothing
+                    srcCount++;
+                }
+            }
+        } catch (java.lang.ArrayIndexOutOfBoundsException ae) {
             String message = JaiI18N.getString("TIFFImage14");
             ImagingListenerProxy.errorOccurred(message,
-                                   new ImagingException(message, ae),
-                                   this, false);
+                    new ImagingException(message, ae),
+                    this, false);
 //	    throw new RuntimeException(JaiI18N.getString("TIFFImage14"));
-	}
+        }
 
-	return dst;
+        return dst;
     }
 
     // Need a createColorModel().
     // Create ComponentColorModel for TYPE_RGB images
     private ComponentColorModel createAlphaComponentColorModel(
-						  int dataType,
-                                                  int numBands,
-						  boolean isAlphaPremultiplied,
-						  int transparency) {
+            int dataType,
+            int numBands,
+            boolean isAlphaPremultiplied,
+            int transparency) {
 
-	ComponentColorModel ccm = null;
+        ComponentColorModel ccm = null;
         int RGBBits[] = null;
         ColorSpace cs = null;
         switch(numBands) {
-        case 2: // gray+alpha
-            cs = ColorSpace.getInstance(ColorSpace.CS_GRAY);
-            break;
-        case 4: // RGB+alpha
-            cs = ColorSpace.getInstance(ColorSpace.CS_sRGB);
-            break;
-        default:
-            throw new IllegalArgumentException();
+            case 2: // gray+alpha
+                cs = ColorSpace.getInstance(ColorSpace.CS_GRAY);
+                break;
+            case 4: // RGB+alpha
+                cs = ColorSpace.getInstance(ColorSpace.CS_sRGB);
+                break;
+            default:
+                throw new IllegalArgumentException();
         }
 
         if(dataType == DataBuffer.TYPE_FLOAT) {
             ccm = new FloatDoubleColorModel(cs,
-                                            true,
-                                            isAlphaPremultiplied,
-                                            transparency,
-                                            dataType);
+                    true,
+                    isAlphaPremultiplied,
+                    transparency,
+                    dataType);
         } else { // all other types
             int componentSize = 0;
             switch(dataType) {
-            case DataBuffer.TYPE_BYTE:
-                componentSize = 8;
-                break;
-            case DataBuffer.TYPE_USHORT:
-            case DataBuffer.TYPE_SHORT:
-                componentSize = 16;
-                break;
-            case DataBuffer.TYPE_INT:
-                componentSize = 32;
-                break;
-            default:
-                throw new IllegalArgumentException();
+                case DataBuffer.TYPE_BYTE:
+                    componentSize = 8;
+                    break;
+                case DataBuffer.TYPE_USHORT:
+                case DataBuffer.TYPE_SHORT:
+                    componentSize = 16;
+                    break;
+                case DataBuffer.TYPE_INT:
+                    componentSize = 32;
+                    break;
+                default:
+                    throw new IllegalArgumentException();
             }
 
             RGBBits = new int[numBands];
@@ -2058,14 +2037,14 @@ public class TIFFImage extends SimpleRenderedImage {
             }
 
             ccm = new ComponentColorModel(cs,
-                                          RGBBits,
-                                          true,
-                                          isAlphaPremultiplied,
-                                          transparency,
-                                          dataType);
+                    RGBBits,
+                    true,
+                    isAlphaPremultiplied,
+                    transparency,
+                    dataType);
         }
 
-	return ccm;
+        return ccm;
     }
 }
 
